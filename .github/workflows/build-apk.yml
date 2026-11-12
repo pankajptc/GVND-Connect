@@ -11,21 +11,49 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
+
+      - name: Generate True PNG App Icons from GC Logo
+        run: |
+          sudo apt-get update && sudo apt-get install -y python3-pil
+          python3 - << 'PY'
+          from PIL import Image
+          import glob, os
+          img = Image.open("assets/gc-logo.jpg").convert("RGBA")
+          sizes = {
+              "mipmap-mdpi": 48,
+              "mipmap-hdpi": 72,
+              "mipmap-xhdpi": 96,
+              "mipmap-xxhdpi": 144,
+              "mipmap-xxxhdpi": 192
+          }
+          for folder, sz in sizes.items():
+              os.makedirs(f"android/app/src/main/res/{folder}", exist_ok=True)
+              resized = img.resize((sz, sz), Image.LANCZOS)
+              resized.save(f"android/app/src/main/res/{folder}/ic_launcher.png", "PNG")
+              resized.save(f"android/app/src/main/res/{folder}/ic_launcher_round.png", "PNG")
+              fg = img.resize((int(sz * 1.5), int(sz * 1.5)), Image.LANCZOS)
+              fg.save(f"android/app/src/main/res/{folder}/ic_launcher_foreground.png", "PNG")
+          print("✅ Generated true PNG icons for all densities!")
+          PY
+
       - name: Install Dependencies, Build Web & Sync Capacitor
         run: |
           npm ci || npm install
           npm run build
           node scripts/prepare-cap-web.mjs
           npx cap sync android
+
       - name: Generate Release Signing Keystore & Build Signed APK
         run: |
           cd android/app
@@ -33,6 +61,7 @@ jobs:
           cd ..
           chmod +x gradlew
           ./gradlew assembleRelease
+
       - name: Upload GVND Connect Signed Release APK
         uses: actions/upload-artifact@v4
         with:
