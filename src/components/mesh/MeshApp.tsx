@@ -1728,8 +1728,7 @@ function FeedList({
                 )}
                 <button type="button" className="mt-2 block w-full text-left" onClick={() => onOpen(post.id)}>
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{post.content}</p>
-                  {post.mediaKey && safeMediaSrc(snap.urls[post.mediaKey]) && (
-                    {(() => {
+                  {post.mediaKey && safeMediaSrc(snap.urls[post.mediaKey]) && (() => {
                   const mUrl = safeMediaSrc(snap.urls[post.mediaKey]) || "";
                   const mType = (post as any).mediaType || "";
                   if (mType.startsWith("video/") || mUrl.includes("video")) {
@@ -1753,7 +1752,6 @@ function FeedList({
                   }
                   return <img src={mUrl} alt="" className="mt-2 max-h-64 w-full rounded-lg object-cover" />;
                 })()}
-                  )}
                 </button>
                 <div className="mt-2 flex items-center gap-4 text-sm text-muted">
                   <button type="button" className={`inline-flex items-center gap-1 ${post.likes.some((id) => sameUid(id, snap.me.globalId)) ? "text-danger" : ""}`} onClick={() => eng.toggleLike(post.id)}>
