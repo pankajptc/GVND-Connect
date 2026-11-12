@@ -24,6 +24,7 @@ jobs:
         run: |
           npm ci || npm install
           npm run build
+          node scripts/prepare-cap-web.mjs
           npx cap sync android
       - name: Generate Release Signing Keystore & Build Signed APK
         run: |
