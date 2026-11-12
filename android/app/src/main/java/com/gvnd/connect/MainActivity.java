@@ -19,6 +19,7 @@ import android.telephony.SmsManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -65,6 +66,8 @@ public class MainActivity extends BridgeActivity {
             wv.getSettings().setJavaScriptEnabled(true);
             wv.getSettings().setDomStorageEnabled(true);
             wv.getSettings().setMediaPlaybackRequiresUserGesture(false);
+            wv.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+            wv.getSettings().setAllowUniversalAccessFromFileURLs(true);
             wv.addJavascriptInterface(new WebAppInterface(), "AndroidBridge");
             wv.setWebChromeClient(new WebChromeClient() {
                 @Override
@@ -232,23 +235,30 @@ public class MainActivity extends BridgeActivity {
 
     public static String getLocalHotspotIp() {
         try {
-            String fallback = "";
+            String wifi192 = "";
+            String apIp = "";
             for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces(); en.hasMoreElements(); ) {
                 NetworkInterface intf = en.nextElement();
                 if (!intf.isUp() || intf.isLoopback()) continue;
                 String name = intf.getName().toLowerCase();
+                if (name.contains("rmnet") || name.contains("ccmni") || name.contains("pdp") || name.contains("dummy")) continue;
                 for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements(); ) {
                     InetAddress inetAddress = enumIpAddr.nextElement();
                     if (!inetAddress.isLoopbackAddress() && inetAddress instanceof Inet4Address) {
                         String ip = inetAddress.getHostAddress();
-                        if (name.contains("ap") || name.contains("wlan") || name.contains("swlan")) return ip;
-                        if (fallback.isEmpty()) fallback = ip;
+                        if (ip.startsWith("192.168.43.") || ip.startsWith("192.168.137.")) return ip;
+                        if (name.contains("ap") || name.contains("swlan") || name.contains("wlan")) {
+                            if (ip.startsWith("192.168.")) apIp = ip;
+                        }
+                        if (ip.startsWith("192.168.") && wifi192.isEmpty()) wifi192 = ip;
                     }
                 }
             }
-            return fallback.isEmpty() ? "127.0.0.1" : fallback;
+            if (!apIp.isEmpty()) return apIp;
+            if (!wifi192.isEmpty()) return wifi192;
+            return "192.168.43.1";
         } catch (Exception e) {
-            return "127.0.0.1";
+            return "192.168.43.1";
         }
     }
 

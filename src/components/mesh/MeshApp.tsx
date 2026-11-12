@@ -2137,7 +2137,19 @@ function ContactsPane({
     setTabMode("phone");
     const nameInput = document.querySelector('input[placeholder*="Contact Name"]') as HTMLInputElement;
     if (nameInput) nameInput.focus();
-    eng.note("Device contact access restricted hai. Yahan naam aur 10-digit number dalein.");
+    if (window.AndroidBridge && window.AndroidBridge.getContacts) {
+      window.AndroidBridge.requestPermissionsNow?.();
+      const raw = window.AndroidBridge.getContacts();
+      const list = JSON.parse(raw || "[]");
+      if (list.length > 0) {
+        list.slice(0, 60).forEach((c: any) => c.tel && eng.addContactByPhone(c.name || c.tel, c.tel));
+        eng.note(list.length + " phone contacts sync ho gaye!");
+        return;
+      } else {
+        window.AndroidBridge.openAppSettings?.();
+      }
+    }
+    eng.note("Contacts permission allow karein ya naam/number dalein.");
   };
 
   // VCF Import
@@ -2508,7 +2520,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
               )}
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*,audio/*"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];

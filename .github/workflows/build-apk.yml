@@ -23,9 +23,10 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Install Dependencies & Sync Capacitor
+      - name: Install Dependencies, Build Web & Sync Capacitor
         run: |
           npm ci || npm install
+          npm run build
           npx cap sync android
 
       - name: Generate Release Signing Keystore & Build Signed APK
@@ -34,7 +35,7 @@ jobs:
           keytool -genkeypair -v -keystore gvnd-release.jks -alias gvndkey -keyalg RSA -keysize 2048 -validity 10000 -storepass gvndconnect -keypass gvndconnect -dname "CN=GVND Connect, OU=Mesh, O=GVND, L=Meerut, ST=UP, C=IN"
           cd ..
           chmod +x gradlew
-          ./gradlew assembleRelease assembleDebug
+          ./gradlew assembleRelease
 
       - name: Upload GVND Connect Signed Release APK
         uses: actions/upload-artifact@v4
