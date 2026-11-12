@@ -1,0 +1,6 @@
+node_modules/
+.nitro/
+.output/
+android/.gradle/
+android/app/build/
+*.tar.gz

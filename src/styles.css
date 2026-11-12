@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: #0b141a;
+  --color-surface: #111b21;
+  --color-elevated: #1c2a32;
+  --color-fg: #e8edef;
+  --color-muted: #8b9aa3;
+  --color-primary: #00a884;
+  --color-primary-fg: #04211b;
+  --color-border: #2a3c46;
+  --color-danger: #e25b5b;
+  --color-bubble: #0c3d34;
+  --radius-lg: 0.75rem;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html,
+  body {
+    height: 100%;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    font-family: var(--font-sans);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+@keyframes mesh-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.mesh-pulse {
+  animation: mesh-pulse 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mesh-pulse {
+    animation: none;
+  }
+}
