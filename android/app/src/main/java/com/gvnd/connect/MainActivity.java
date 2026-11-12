@@ -476,12 +476,12 @@ public class MainActivity extends BridgeActivity {
                     JSONArray roster = new JSONArray();
                     Iterator it = rooms.get(room).entrySet().iterator();
                     while (it.hasNext()) {
-                        Map.Entry<String, JSONObject> e = it.next();
-                        if (now - e.getValue().optLong("ts") > 25000) it.remove();
+                        Map.Entry e = (Map.Entry) it.next();
+                        if (now - ((JSONObject) e.getValue()).optLong("ts") > 25000) it.remove();
                         else {
                             JSONObject item = new JSONObject();
-                            item.put("id", e.getValue().optString("id"));
-                            item.put("name", e.getValue().optString("name"));
+                            item.put("id", ((JSONObject) e.getValue()).optString("id"));
+                            item.put("name", ((JSONObject) e.getValue()).optString("name"));
                             roster.put(item);
                         }
                     }
