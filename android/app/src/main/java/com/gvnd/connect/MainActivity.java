@@ -191,13 +191,20 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public boolean sendSms(String phoneNumber, String message) {
             try {
-                if (true) {
-                    Intent intent = new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(phoneNumber)));
-                    intent.putExtra("sms_body", message);
-                    startActivity(intent);
-                    smsSentDetected = true;
-                    return true;
-                }
+                Intent intent = new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(phoneNumber)));
+                intent.putExtra("sms_body", message);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+                smsSentDetected = true;
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    try {
+                        WebView wv = getBridge().getWebView();
+                        if (wv != null) {
+                            wv.evaluateJavascript("window.dispatchEvent(new CustomEvent('gvnd-sms-verified'));", null);
+                        }
+                    } catch (Exception ignored) {}
+                }, 3500);
+                return true;
             } catch (Exception e) {
                 return false;
             }
