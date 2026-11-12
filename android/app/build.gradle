@@ -16,9 +16,9 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    }
     signingConfigs {
         release {
-            signingConfig signingConfigs.release
             storeFile file("gvnd-release.jks")
             storePassword "gvndconnect"
             keyAlias "gvndkey"
@@ -27,6 +27,7 @@ android {
     }
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
