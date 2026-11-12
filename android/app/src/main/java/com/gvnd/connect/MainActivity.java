@@ -474,7 +474,7 @@ public class MainActivity extends BridgeActivity {
                     }
 
                     JSONArray roster = new JSONArray();
-                    Iterator> it = rooms.get(room).entrySet().iterator();
+                    Iterator it = rooms.get(room).entrySet().iterator();
                     while (it.hasNext()) {
                         Map.Entry<String, JSONObject> e = it.next();
                         if (now - e.getValue().optLong("ts") > 25000) it.remove();
