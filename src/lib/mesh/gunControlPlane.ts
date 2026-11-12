@@ -18,7 +18,7 @@ class GvndControlPlane {
       this.peers.add("http://127.0.0.1:18081/gun");
     }
 
-    this.gun = Gun({
+    this.gun = ((typeof window !== "undefined" && (window as any).Gun) ? (window as any).Gun : ((opts: any) => ({ get: () => ({ map: () => ({ on: () => {}, once: () => {} }), on: () => {}, once: () => {}, put: () => {}, set: () => {} }), user: () => ({ auth: () => {}, create: () => {}, recall: () => {}, is: null, get: () => ({ put: () => {}, on: () => {} }) }), on: () => {} })) as any)({
       peers: Array.from(this.peers),
       localStorage: false,
       radisk: true,
