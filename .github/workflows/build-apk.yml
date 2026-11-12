@@ -1,4 +1,4 @@
-name: Build GVND Connect APK
+name: Build GVND Connect APK v1.0.1
 
 on:
   push:
@@ -28,14 +28,16 @@ jobs:
           npm ci || npm install
           npx cap sync android
 
-      - name: Build Android Debug APK
+      - name: Generate Release Signing Keystore & Build Signed APK
         run: |
-          cd android
+          cd android/app
+          keytool -genkeypair -v -keystore gvnd-release.jks -alias gvndkey -keyalg RSA -keysize 2048 -validity 10000 -storepass gvndconnect -keypass gvndconnect -dname "CN=GVND Connect, OU=Mesh, O=GVND, L=Meerut, ST=UP, C=IN"
+          cd ..
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease assembleDebug
 
-      - name: Upload GVND Connect APK
+      - name: Upload GVND Connect Signed Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: GVND-Connect-Debug-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: GVND-Connect-v1.0.1-Signed-APK
+          path: android/app/build/outputs/apk/release/app-release.apk

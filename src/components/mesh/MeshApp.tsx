@@ -1668,11 +1668,20 @@ function FeedList({
             <ImageIcon className="size-5" />
             <input
               type="file"
-              accept="image/*"
+              accept="image/*,video/*,audio/*"
               className="hidden"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
           </label>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("gvnd-open-live", { detail: { level: snap.me.verification?.level || 0 } }))}
+            className={`inline-flex min-h-11 items-center gap-1 rounded-lg border px-2.5 text-xs font-semibold ${(snap.me.verification?.level || 0) >= 2 ? "border-danger/60 bg-danger/15 text-danger" : "border-border bg-bg text-muted opacity-60"}`}
+            title="Live Stream (Level 2 Verified Only · 360p · 100MB Auto-Post)"
+          >
+            <span className="size-2 rounded-full bg-danger animate-pulse" />
+            Live
+          </button>
           {filter === "groups" && (
             <select
               aria-label="Group"
@@ -1685,7 +1694,7 @@ function FeedList({
               ))}
             </select>
           )}
-          <span className="min-w-0 flex-1 truncate text-xs text-muted">{file ? file.name : "Photo optional"}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-muted">{file ? file.name : "Photo / Video / Audio"}</span>
           <button type="submit" className="min-h-11 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-fg">Post</button>
         </div>
       </form>
@@ -1720,7 +1729,30 @@ function FeedList({
                 <button type="button" className="mt-2 block w-full text-left" onClick={() => onOpen(post.id)}>
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{post.content}</p>
                   {post.mediaKey && safeMediaSrc(snap.urls[post.mediaKey]) && (
-                    <img src={safeMediaSrc(snap.urls[post.mediaKey]) || ""} alt="" className="mt-2 max-h-64 w-full rounded-lg object-cover" />
+                    {(() => {
+                  const mUrl = safeMediaSrc(snap.urls[post.mediaKey]) || "";
+                  const mType = (post as any).mediaType || "";
+                  if (mType.startsWith("video/") || mUrl.includes("video")) {
+                    return (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.dispatchEvent(new CustomEvent("gvnd-open-reel", { detail: { postId: post.id } }));
+                        }}
+                        className="relative mt-2 overflow-hidden rounded-xl border border-border bg-black"
+                      >
+                        <video src={mUrl} preload="metadata" muted playsInline className="max-h-72 w-full object-cover" />
+                        <span className="absolute bottom-2 right-2 rounded-full bg-black/75 px-2.5 py-1 text-[11px] font-semibold text-white">
+                          ▶ Reel Mode
+                        </span>
+                      </div>
+                    );
+                  }
+                  if (mType.startsWith("audio/") || mUrl.includes("audio")) {
+                    return <audio src={mUrl} controls preload="metadata" className="mt-2 w-full" />;
+                  }
+                  return <img src={mUrl} alt="" className="mt-2 max-h-64 w-full rounded-lg object-cover" />;
+                })()}
                   )}
                 </button>
                 <div className="mt-2 flex items-center gap-4 text-sm text-muted">
@@ -2060,6 +2092,28 @@ function ContactsPane({
 
   // Native Contact Picker (No File-Picker Fallback Loop)
   const handleNativeContactPicker = async () => {
+    if (typeof window !== "undefined" && window.AndroidBridge && window.AndroidBridge.getContacts) {
+      try {
+        window.AndroidBridge.requestPermissionsNow?.();
+        const raw = window.AndroidBridge.getContacts();
+        const list = JSON.parse(raw || "[]");
+        if (Array.isArray(list) && list.length > 0) {
+          let added = 0;
+          for (const item of list.slice(0, 50)) {
+            if (item.tel) {
+              eng.addContactByPhone(item.name || item.tel, item.tel);
+              added++;
+            }
+          }
+          eng.note(`${added} phone contacts sync ho gaye!`);
+          return;
+        } else {
+          eng.note("Contacts permission allow karein — App Settings khul rahi hai.");
+          window.AndroidBridge.openAppSettings?.();
+          return;
+        }
+      } catch (e) {}
+    }
     if (typeof navigator !== "undefined" && "contacts" in navigator && "ContactsManager" in window) {
       try {
         const picked = await (navigator as any).contacts.select(["name", "tel"], { multiple: false });

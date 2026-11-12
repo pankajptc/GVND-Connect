@@ -4,6 +4,11 @@ export interface AndroidNativeBridge {
   saveAndOpenFile(base64Data: string, fileName: string, mimeType: string): void;
   getContacts(): string;
   sendSms(phoneNumber: string, message: string): boolean;
+  getHttpsHostUrl?(): string;
+  getLocalIp?(): string;
+  requestPermissionsNow?(): void;
+  openAppSettings?(): void;
+  isSmsVerified?(): boolean;
 }
 
 declare global {
