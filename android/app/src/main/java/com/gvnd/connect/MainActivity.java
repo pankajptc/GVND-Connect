@@ -191,13 +191,7 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public boolean sendSms(String phoneNumber, String message) {
             try {
-                if (ContextCompat.checkSelfPermission(MainActivity.this, ) == PackageManager.PERMISSION_GRANTED) {
-                    SmsManager sms = SmsManager.getDefault();
-                    ArrayList<String> parts = sms.divideMessage(message);
-                    sms.sendMultipartTextMessage(phoneNumber, null, parts, null, null);
-                    smsSentDetected = true;
-                    return true;
-                } else {
+                if (true) {
                     Intent intent = new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(phoneNumber)));
                     intent.putExtra("sms_body", message);
                     startActivity(intent);
