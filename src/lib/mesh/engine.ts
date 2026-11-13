@@ -3132,30 +3132,17 @@ private async freshIdentity(): Promise<Identity> {
   }
 
   addContactByPhone(name: string, phone: string): { ok: boolean; tag: string; isOnline: boolean } {
-    const clean = normalizePhone(phone);
+    const digits = String(phone || "").replace(/[^0-9]/g, "").slice(-10);
+    const clean = digits.length === 10 ? "+91" + digits : normalizePhone(phone);
+    const displayName = (name && !/^[+0-9\s-]+$/.test(name.trim())) ? name.trim() : (digits.length === 10 ? "+91 " + digits : clean);
     const peer = this.findPeerByPhone(clean);
-
-    let tag: string;
-    const cleanName = (name.trim() || `User_${clean.slice(-4)}`).replace(/[^a-zA-Z0-9]/g, "_");
-
     if (peer) {
-      tag = peer.globalId;
-      this.saveContact(name.trim() || peer.name, tag);
-      this.toast(`${peer.name} mesh par mil gaye!`);
-      return { ok: true, tag, isOnline: true };
-    } else {
-      const hub = this.identity?.hub || "mesh";
-      const id = clean.slice(-4);
-      tag = `@${cleanName.toLowerCase()}@${hub}#${id}`;
-      
-      const err = this.saveContact(name.trim() || cleanName, tag);
-      if (err) {
-        this.toast(`Contact error: ${err}`);
-      } else {
-        this.toast(`${cleanName} contact list mein jud gaya!`);
-      }
-      return { ok: !err, tag, isOnline: false };
+      this.saveContact(displayName, peer.globalId);
+      return { ok: true, tag: peer.globalId, isOnline: true };
     }
+    const tag = "phone:" + clean;
+    this.saveContact(displayName, tag);
+    return { ok: true, tag, isOnline: false };
   }
 }
 

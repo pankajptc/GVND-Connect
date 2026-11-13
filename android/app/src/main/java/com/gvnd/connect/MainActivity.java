@@ -7,6 +7,14 @@ import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.database.Cursor;
 import android.net.Uri;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.Collections;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -57,6 +65,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        startLocalMeshHttpServer();
         requestAllRuntimePermissions();
         registerSmsSentObserver();
         startEmbeddedServers();
@@ -124,9 +133,28 @@ public class MainActivity extends BridgeActivity {
 
     public class WebAppInterface {
         @JavascriptInterface
-        public String getHostUrl() {
-            return "http://" + getLocalHotspotIp() + ":18081";
-        }
+    public String getHostUrl() {
+        try {
+            String fallbackIp = null;
+            for (NetworkInterface intf : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!intf.isUp() || intf.isLoopback()) continue;
+                String name = intf.getName().toLowerCase();
+                for (InetAddress addr : Collections.list(intf.getInetAddresses())) {
+                    if (!addr.isLoopbackAddress() && addr instanceof Inet4Address) {
+                        String ip = addr.getHostAddress();
+                        if (ip != null && (ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172."))) {
+                            if (name.contains("ap") || name.contains("swlan") || name.contains("wlan1") || ip.endsWith(".1")) {
+                                return "http://" + ip + ":18081";
+                            }
+                            fallbackIp = ip;
+                        }
+                    }
+                }
+            }
+            if (fallbackIp != null) return "http://" + fallbackIp + ":18081";
+        } catch (Exception ignored) {}
+        return "Hotspot Off (Pehle Hotspot On Karein)";
+    }
 
         @JavascriptInterface
         public String getHttpsHostUrl() {
@@ -641,5 +669,45 @@ public class MainActivity extends BridgeActivity {
             } catch (Exception ignored) {}
         }
         return map;
+    }
+
+    private void startLocalMeshHttpServer() {
+        new Thread(() -> {
+            try (ServerSocket server = new ServerSocket(18081, 50, InetAddress.getByName("0.0.0.0"))) {
+                while (!server.isClosed()) {
+                    try (Socket client = server.accept()) {
+                        InputStream in = client.getInputStream();
+                        byte[] buf = new byte[2048];
+                        int r = in.read(buf);
+                        String req = r > 0 ? new String(buf, 0, r) : "";
+                        String path = "public/index.html";
+                        if (req.startsWith("GET ")) {
+                            String rawPath = req.split(" ")[1].split("\\?")[0];
+                            if (rawPath.length() > 1) path = "public" + rawPath;
+                        }
+                        byte[] body;
+                        String mime = "text/html; charset=utf-8";
+                        if (path.endsWith(".js")) mime = "application/javascript; charset=utf-8";
+                        else if (path.endsWith(".css")) mime = "text/css; charset=utf-8";
+                        else if (path.endsWith(".svg")) mime = "image/svg+xml";
+                        else if (path.endsWith(".png")) mime = "image/png";
+                        else if (path.endsWith(".jpg")) mime = "image/jpeg";
+                        try (InputStream assetIn = getAssets().open(path)) {
+                            body = assetIn.readAllBytes();
+                        } catch (Exception e) {
+                            try (InputStream idxIn = getAssets().open("public/index.html")) {
+                                body = idxIn.readAllBytes();
+                                mime = "text/html; charset=utf-8";
+                            }
+                        }
+                        OutputStream out = client.getOutputStream();
+                        String hdr = "HTTP/1.1 200 OK\r\nContent-Type: " + mime + "\r\nContent-Length: " + body.length + "\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";
+                        out.write(hdr.getBytes());
+                        out.write(body);
+                        out.flush();
+                    } catch (Exception ignored) {}
+                }
+            } catch (Exception ignored) {}
+        }).start();
     }
 }
