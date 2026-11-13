@@ -2558,7 +2558,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
                     ? "Peer Vouched Node (Level 2)"
                     : "SIM Verified Node (Level 1)"
                   : snap.me.verification?.phone
-                  ? "{(localStorage.getItem("gvnd_sms_verified") === "1" || (eng as any).trustLevel >= 1) ? "Level 1 Verified (SMS)" : "Unverified Node"}"
+                  ? ((typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (eng as any).trustLevel >= 1 ? "Level 1 Verified (SMS)" : "Unverified Node")
                   : ((typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (eng as any).trustLevel >= 1 || (eng as any).profile?.verified ? "Verified Node (Level 1)" : "Unverified Node")}
               </span>
               <VerificationBadge verified={snap.me.verification?.verified} type={snap.me.verification?.type} />
