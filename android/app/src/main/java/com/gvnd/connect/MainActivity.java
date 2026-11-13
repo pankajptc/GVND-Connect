@@ -26,6 +26,7 @@ import android.security.keystore.KeyProperties;
 import android.telephony.SmsManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -51,6 +52,28 @@ import javax.net.ssl.SSLServerSocketFactory;
 import javax.security.auth.x500.X500Principal;
 
 public class MainActivity extends BridgeActivity {
+    private ValueCallback<Uri[]> filePathCallback;
+    private static final int FILE_CHOOSER_REQ = 9001;
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == FILE_CHOOSER_REQ && filePathCallback != null) {
+            Uri[] results = null;
+            if (resultCode == RESULT_OK && data != null) {
+                if (data.getClipData() != null) {
+                    int count = data.getClipData().getItemCount();
+                    results = new Uri[count];
+                    for (int i = 0; i < count; i++) results[i] = data.getClipData().getItemAt(i).getUri();
+                } else if (data.getData() != null) {
+                    results = new Uri[]{data.getData()};
+                }
+            }
+            filePathCallback.onReceiveValue(results);
+            filePathCallback = null;
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
     private static volatile boolean serverStarted = false;
     private static final ConcurrentHashMap<String, ConcurrentHashMap<String, JSONObject>> rooms = new ConcurrentHashMap<>();
     private static final CopyOnWriteArrayList<JSONObject> signals = new CopyOnWriteArrayList<>();
@@ -66,6 +89,20 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         startLocalMeshHttpServer();
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().setWebChromeClient(new WebChromeClient() {
+                @Override
+                public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                    if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+                    filePathCallback = callback;
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("*/*");
+                    startActivityForResult(Intent.createChooser(intent, "Select File"), FILE_CHOOSER_REQ);
+                    return true;
+                }
+            });
+        }
         requestAllRuntimePermissions();
         registerSmsSentObserver();
         startEmbeddedServers();
@@ -679,6 +716,11 @@ public class MainActivity extends BridgeActivity {
                         InputStream in = client.getInputStream();
                         byte[] buf = new byte[2048];
                         int r = in.read(buf);
+                        if (r > 0 && (buf[0] & 0xFF) == 0x16) {
+                            // Browser attempted HTTPS on HTTP port; close immediately so browser falls back to HTTP
+                            client.close();
+                            continue;
+                        }
                         String req = r > 0 ? new String(buf, 0, r) : "";
                         String path = "public/index.html";
                         if (req.startsWith("GET ")) {
