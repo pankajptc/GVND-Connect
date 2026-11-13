@@ -2558,7 +2558,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
                     ? "Peer Vouched Node (Level 2)"
                     : "SIM Verified Node (Level 1)"
                   : snap.me.verification?.phone
-                  ? "Pending Peer Vouch"
+                  ? "{(localStorage.getItem("gvnd_sms_verified") === "1" || (eng as any).trustLevel >= 1) ? "Level 1 Verified (SMS)" : "Unverified Node"}"
                   : ((typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (eng as any).trustLevel >= 1 || (eng as any).profile?.verified ? "Verified Node (Level 1)" : "Unverified Node")}
               </span>
               <VerificationBadge verified={snap.me.verification?.verified} type={snap.me.verification?.type} />
@@ -2890,7 +2890,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
                 <div className="flex flex-col items-center justify-center p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 gap-2">
                   <div className="size-5 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
                   <span className="text-xs font-semibold text-emerald-400">
-                    Listening for Carrier Loopback...
+                    Listening for Carrier Loopback... (SMS bhejte hi auto-verify hoga)
                   </span>
                   <span className="text-[11px] text-muted">
                     SMS deliver hote hi hardware SIM lock verify ho jayega.
