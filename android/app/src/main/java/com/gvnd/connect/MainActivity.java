@@ -775,10 +775,10 @@ public class MainActivity extends BridgeActivity {
                                 else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) mime = "image/jpeg";
                                 else if (path.endsWith(".json")) mime = "application/json";
                                 try (InputStream assetIn = getAssets().open(path)) {
-                                    body = assetIn.readAllBytes();
+                                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream(); byte[] tmp = new byte[4096]; int n; while ((n = assetIn.read(tmp)) != -1) baos.write(tmp, 0, n); body = baos.toByteArray();
                                 } catch (Exception e) {
                                     try (InputStream idxIn = getAssets().open("public/index.html")) {
-                                        body = idxIn.readAllBytes();
+                                        java.io.ByteArrayOutputStream baos2 = new java.io.ByteArrayOutputStream(); byte[] tmp2 = new byte[4096]; int n2; while ((n2 = idxIn.read(tmp2)) != -1) baos2.write(tmp2, 0, n2); body = baos2.toByteArray();
                                         mime = "text/html; charset=utf-8";
                                     }
                                 }

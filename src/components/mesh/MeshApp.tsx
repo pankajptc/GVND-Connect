@@ -1391,7 +1391,7 @@ function ChatPane({
                 {snap.contacts.length === 0 ? (
                   <p className="text-xs text-muted text-center py-3">Koi saved mesh contact nahi hai.</p>
                 ) : (
-                  snap.contacts.map((c) => (
+                  snap.contacts.slice(0, contactLimit).map((c) => (
                     <button
                       key={String(c.tag || "").startsWith("phone:") ? (String(c.tag).replace("phone:", "") + " • Not on Mesh (Tap to Invite)") : c.tag}
                       type="button"
@@ -1414,7 +1414,7 @@ function ChatPane({
         <input
           ref={fileRef}
           type="file"
-          className="hidden"
+          className="opacity-0 w-0 h-0 overflow-hidden absolute -z-10"
           onChange={(e) => {
             const file = e.target.files?.[0];
             e.target.value = "";
@@ -1555,7 +1555,7 @@ function ChatPane({
 
             <div className="max-h-60 space-y-1 overflow-y-auto">
               {[...new Set([
-                ...snap.contacts.map((c) => c.tag),
+                ...snap.contacts.slice(0, contactLimit).map((c) => c.tag),
                 ...snap.peers.map((p) => p.globalId),
                 ...snap.groups.map((g) => g.id),
                 ...Object.keys(snap.chats),
@@ -1669,7 +1669,7 @@ function FeedList({
             <input
               type="file"
               accept="image/*,video/*,audio/*"
-              className="hidden"
+              className="opacity-0 w-0 h-0 overflow-hidden absolute -z-10"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
           </label>
@@ -1986,6 +1986,7 @@ function ContactsPane({
   eng: MeshEngine;
   onOpen: (tag: string) => void;
 }) {
+  const [contactLimit, setContactLimit] = React.useState(40);
   const [tabMode, setTabMode] = useState<"phone" | "handle">("phone");
   const [phoneName, setPhoneName] = useState("");
   const [phone, setPhone] = useState("");
@@ -2194,7 +2195,7 @@ function ContactsPane({
         ref={fileInputRef}
         type="file"
         accept=".vcf,text/vcard"
-        className="hidden"
+        className="opacity-0 w-0 h-0 overflow-hidden absolute -z-10"
         onChange={handleVcfImport}
       />
 
@@ -2363,12 +2364,12 @@ function ContactsPane({
       </div>
 
       <div>
-        <h4 className="mb-2 px-1 text-xs font-semibold text-muted">Saved Contacts ({snap.contacts.length})</h4>
+        <h4 className="mb-2 px-1 text-xs font-semibold text-muted">Saved Contacts ({snap.contacts.length} • Showing {Math.min(contactLimit, snap.contacts.length)})</h4>
         {snap.contacts.length === 0 ? (
           <Empty icon={Users} title="Koi contact nahi" body="Mobile number ya handle daal kar contact add karein." />
         ) : (
           <ul className="divide-y divide-border rounded-xl border border-border bg-surface overflow-hidden">
-            {snap.contacts.map((c) => {
+            {snap.contacts.slice(0, contactLimit).map((c) => {
               const isLive = snap.peers.some((p) => sameUid(p.globalId, c.tag));
               return (
                 <li key={String(c.tag || "").startsWith("phone:") ? (String(c.tag).replace("phone:", "") + " • Not on Mesh (Tap to Invite)") : c.tag} className="flex items-center gap-3 p-3 hover:bg-elevated/40">
@@ -2520,7 +2521,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
               <input
                 type="file"
                 accept="image/*,video/*,audio/*"
-                className="hidden"
+                className="opacity-0 w-0 h-0 overflow-hidden absolute -z-10"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) void (eng as any).setAvatarFile(file);
@@ -2725,7 +2726,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
           ref={fileRef}
           type="file"
           accept=".json,.meshvault,application/json"
-          className="hidden"
+          className="opacity-0 w-0 h-0 overflow-hidden absolute -z-10"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (!file) return;
