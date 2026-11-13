@@ -1,13 +1,16 @@
 (function () {
-  if (window.__gvndV104Final) return;
-  window.__gvndV104Final = true;
+  if (window.__gvndV107Clean) return;
+  window.__gvndV107Clean = true;
 
   if (window.AndroidBridge && window.AndroidBridge.isSmsVerified && window.AndroidBridge.isSmsVerified()) {
     localStorage.setItem("gvnd_sms_verified", "1");
   }
 
+  let smsHandled = false;
   window.addEventListener("gvnd-sms-verified", function () {
+    if (smsHandled) return;
+    smsHandled = true;
     localStorage.setItem("gvnd_sms_verified", "1");
-    setTimeout(function () { window.location.reload(); }, 350);
+    window.dispatchEvent(new CustomEvent("gvnd-force-refresh"));
   });
 })();
