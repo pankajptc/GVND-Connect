@@ -211,6 +211,7 @@ public class MainActivity extends BridgeActivity {
             for (NetworkInterface intf : Collections.list(NetworkInterface.getNetworkInterfaces())) {
                 if (!intf.isUp() || intf.isLoopback()) continue;
                 String name = intf.getName().toLowerCase();
+                if (name.contains("rmnet") || name.contains("ccmni") || name.contains("pdp") || name.contains("dummy")) continue;
                 for (InetAddress addr : Collections.list(intf.getInetAddresses())) {
                     if (!addr.isLoopbackAddress() && addr instanceof Inet4Address) {
                         String ip = addr.getHostAddress();

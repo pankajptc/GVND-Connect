@@ -1986,7 +1986,7 @@ function ContactsPane({
   eng: MeshEngine;
   onOpen: (tag: string) => void;
 }) {
-  const [contactLimit, setContactLimit] = React.useState(40);
+  const [contactLimit, setContactLimit] = useState(40);
   const [tabMode, setTabMode] = useState<"phone" | "handle">("phone");
   const [phoneName, setPhoneName] = useState("");
   const [phone, setPhone] = useState("");
