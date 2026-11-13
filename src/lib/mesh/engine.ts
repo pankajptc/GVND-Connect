@@ -129,11 +129,7 @@ const EMPTY_ME: PublicIdentity = {
   bio: "",
   secretPin: "0000",
   publicKey: {},
-  verification: {
-    verified: false,
-    type: "none",
-    level: 0,
-  },
+  verification: (typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") ? { verified: true, type: "sms", level: 1 } : { verified: false, type: "none", level: 0 },
 };
 
 export const EMPTY_SNAP: Snap = {

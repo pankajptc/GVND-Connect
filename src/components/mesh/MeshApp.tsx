@@ -1393,7 +1393,7 @@ function ChatPane({
                 ) : (
                   snap.contacts.map((c) => (
                     <button
-                      key={c.tag}
+                      key={String(c.tag || "").startsWith("phone:") ? (String(c.tag).replace("phone:", "") + " • Not on Mesh (Tap to Invite)") : c.tag}
                       type="button"
                       className="flex w-full items-center justify-between rounded-lg p-2 text-left hover:bg-elevated text-xs transition-colors"
                       onClick={() => {
@@ -1403,7 +1403,7 @@ function ChatPane({
                       }}
                     >
                       <span className="font-semibold text-fg truncate">{c.name}</span>
-                      <span className="font-mono text-[10px] text-muted truncate max-w-[120px]">{c.tag}</span>
+                      <span className="font-mono text-[10px] text-muted truncate max-w-[120px]">{String(c.tag || "").startsWith("phone:") ? (String(c.tag).replace("phone:", "") + " • Not on Mesh (Tap to Invite)") : c.tag}</span>
                     </button>
                   ))
                 )}
@@ -2097,7 +2097,7 @@ function ContactsPane({
         const list = JSON.parse(raw || "[]");
         if (Array.isArray(list) && list.length > 0) {
           let added = 0;
-          for (const item of list.slice(0, 50)) {
+          for (const item of list) {
             if (item.tel) {
               eng.addContactByPhone(item.name || item.tel, item.tel);
               added++;
@@ -2142,7 +2142,7 @@ function ContactsPane({
       const raw = window.AndroidBridge.getContacts();
       const list = JSON.parse(raw || "[]");
       if (list.length > 0) {
-        list.slice(0, 60).forEach((c: any) => c.tel && eng.addContactByPhone(c.name || c.tel, c.tel));
+        list.forEach((c: any) => c.tel && eng.addContactByPhone(c.name || c.tel, c.tel));
         eng.note(list.length + " phone contacts sync ho gaye!");
         return;
       } else {
@@ -2371,7 +2371,7 @@ function ContactsPane({
             {snap.contacts.map((c) => {
               const isLive = snap.peers.some((p) => sameUid(p.globalId, c.tag));
               return (
-                <li key={c.tag} className="flex items-center gap-3 p-3 hover:bg-elevated/40">
+                <li key={String(c.tag || "").startsWith("phone:") ? (String(c.tag).replace("phone:", "") + " • Not on Mesh (Tap to Invite)") : c.tag} className="flex items-center gap-3 p-3 hover:bg-elevated/40">
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -2385,7 +2385,7 @@ function ContactsPane({
                           <span className="size-2 rounded-full bg-emerald-500" title="Online on Mesh" />
                         )}
                       </div>
-                      <div className="truncate font-mono text-xs text-muted">{c.tag}</div>
+                      <div className="truncate font-mono text-xs text-muted">{String(c.tag || "").startsWith("phone:") ? (String(c.tag).replace("phone:", "") + " • Not on Mesh (Tap to Invite)") : c.tag}</div>
                     </div>
                   </button>
                   <button
@@ -2428,7 +2428,7 @@ function SearchPane({ snap, onOpen, onPost }: { snap: Snap; onOpen: (tag: string
           <Hit key={peer.globalId} title={peer.name} meta={`${peer.via} · ${peer.globalId}`} onClick={() => onOpen(peer.globalId)} />
         ))}
         {contacts.map((c) => (
-          <Hit key={c.tag} title={c.name} meta={`Contact · ${c.tag}`} onClick={() => onOpen(c.tag)} />
+          <Hit key={String(c.tag || "").startsWith("phone:") ? (String(c.tag).replace("phone:", "") + " • Not on Mesh (Tap to Invite)") : c.tag} title={c.name} meta={`Contact · ${String(c.tag || "").startsWith("phone:") ? (String(c.tag).replace("phone:", "") + " • Not on Mesh (Tap to Invite)") : c.tag}`} onClick={() => onOpen(c.tag)} />
         ))}
         {posts.map((p) => (
           <Hit key={p.id} title={p.author} meta={p.content} onClick={() => onPost(p.id)} />
