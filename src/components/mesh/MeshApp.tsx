@@ -2559,7 +2559,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
                     : "SIM Verified Node (Level 1)"
                   : snap.me.verification?.phone
                   ? "Pending Peer Vouch"
-                  : "{(localStorage.getItem("gvnd_sms_verified") === "1" || (eng as any).trustLevel >= 1 || (eng as any).profile?.verified) ? "Verified Node (Level 1)" : "Unverified Node"}"}
+                  : ((typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (eng as any).trustLevel >= 1 || (eng as any).profile?.verified ? "Verified Node (Level 1)" : "Unverified Node")}
               </span>
               <VerificationBadge verified={snap.me.verification?.verified} type={snap.me.verification?.type} />
             </div>
