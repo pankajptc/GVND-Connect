@@ -3076,7 +3076,7 @@ function Hub({ snap, eng, onGroup }: { snap: Snap; eng: MeshEngine; onGroup: () 
   const [showShareModal, setShowShareModal] = useState(false);
   const [hotspotSsid, setHotspotSsid] = useState("GVND-Connect-Hotspot");
   const [hotspotPass, setHotspotPass] = useState("");
-  const localUrl = getLocalHostShareUrl() || "{((typeof window !== "undefined" && (window as any).AndroidBridge?.getHostUrl?.()) || "Hotspot Off (Pehle Hotspot On Karein)")}";
+  const localUrl = (((typeof window !== "undefined" && (window as any).AndroidBridge?.getHostUrl?.()) || getLocalHostShareUrl() || "Hotspot Off (Pehle Hotspot On Karein)"));
 
   // Standard Wi-Fi connection QR payload string
   const wifiQrPayload = hotspotPass
