@@ -2578,7 +2578,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
         {!snap.me.verification?.verified ? (
           <div className="space-y-2.5 border-t border-border pt-3">
             <p className="text-xs leading-relaxed text-muted">
-              Unverified accounts par restrictions hain. Self-SMS se apna real mobile number bind karein.
+              {((typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (snap.me?.verification?.level || 0) >= 1) ? "Aapka mobile number Self-SMS se Level-1 Verified hai. Sabhi features unlocked hain!" : "Unverified accounts par restrictions hain. Self-SMS se apna real mobile number bind karein."}
             </p>
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
@@ -2586,7 +2586,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
                 className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-semibold text-primary-fg hover:opacity-95 active:scale-95 transition-all shadow-sm"
                 onClick={() => setShowVerifyModal(true)}
               >
-                <ShieldCheck className="size-4" /> Verify to Get Full Access
+                <ShieldCheck className="size-4" /> {((typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (snap.me?.verification?.level || 0) >= 1) ? "Verified (Level 1 ✓)" : "Verify to Get Full Access"}
               </button>
               <button
                 type="button"

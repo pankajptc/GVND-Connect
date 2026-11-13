@@ -1,16 +1,20 @@
 (function () {
-  if (window.__gvndV107Clean) return;
-  window.__gvndV107Clean = true;
+  if (window.__gvndV108Clean) return;
+  window.__gvndV108Clean = true;
 
-  if (window.AndroidBridge && window.AndroidBridge.isSmsVerified && window.AndroidBridge.isSmsVerified()) {
+  function checkAndCloseLoopbackModal() {
+    const ok = localStorage.getItem("gvnd_sms_verified") === "1" ||
+      (window.AndroidBridge && window.AndroidBridge.isSmsVerified && window.AndroidBridge.isSmsVerified());
+    if (!ok) return;
     localStorage.setItem("gvnd_sms_verified", "1");
+    const btns = Array.from(document.querySelectorAll("button"));
+    const cancelBtn = btns.find(function (b) { return (b.innerText || "").includes("Cancel Verification"); });
+    if (cancelBtn) cancelBtn.click();
   }
 
-  let smsHandled = false;
+  setInterval(checkAndCloseLoopbackModal, 1200);
   window.addEventListener("gvnd-sms-verified", function () {
-    if (smsHandled) return;
-    smsHandled = true;
     localStorage.setItem("gvnd_sms_verified", "1");
-    window.dispatchEvent(new CustomEvent("gvnd-force-refresh"));
+    checkAndCloseLoopbackModal();
   });
 })();
