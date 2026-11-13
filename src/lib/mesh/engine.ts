@@ -884,7 +884,7 @@ export class MeshEngine {
   saveContact(name: string, tag: string): string | null {
     const cleanTag = tag.trim();
     const cleanName = name.trim();
-    if (!cleanName || !tagOk(cleanTag)) return "Naam aur sahi global tag dono chahiye.";
+    if (!cleanName || (!cleanTag.startsWith("phone:") && !tagOk(cleanTag))) return "Naam aur sahi global tag dono chahiye.";
     const rest = this.contacts.filter((c) => !sameUid(c.tag, cleanTag));
     this.contacts = [...rest, { name: cleanName.slice(0, 40), tag: cleanTag }];
     this.emitPersist();

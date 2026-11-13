@@ -2460,8 +2460,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
     .filter((m) => snap.starred.includes(m.id));
 
   // Level 1 (Self-SMS) ya Level 2 (2+ Peers Vouched) check
-  const isLevel1Or2 =
-    Boolean(snap.me.verification?.verified) &&
+  const isLevel1Or2 = Boolean(snap.me.verification?.verified || (typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (snap.me.verification?.level || 0) >= 1) &&
     (snap.me.verification?.level === 1 ||
       snap.me.verification?.level === 2 ||
       snap.me.verification?.type === "self_sms" ||
@@ -2578,13 +2577,21 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
         {!snap.me.verification?.verified ? (
           <div className="space-y-2.5 border-t border-border pt-3">
             <p className="text-xs leading-relaxed text-muted">
-              {((typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (snap.me?.verification?.level || 0) >= 1) ? "Aapka mobile number Self-SMS se Level-1 Verified hai. Sabhi features unlocked hain!" : "Unverified accounts par restrictions hain. Self-SMS se apna real mobile number bind karein."}
+              {((typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (snap.me?.verification?.level || 0) >= 1) ? ("Verified Mobile: " + (((typeof window !== "undefined" && localStorage.getItem("gvnd_verified_phone")) || (snap.me?.verification as any)?.phone || "Active SIM")) + " • Level-1 Verified (Sabhi features unlocked!)") : "Unverified accounts par restrictions hain. Self-SMS se apna real mobile number bind karein."}
             </p>
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
                 type="button"
                 className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-semibold text-primary-fg hover:opacity-95 active:scale-95 transition-all shadow-sm"
-                onClick={() => setShowVerifyModal(true)}
+                onClick={() => {
+    const isL1 = (typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (snap.me?.verification?.level || 0) >= 1;
+    if (isL1) {
+      const ph = (typeof window !== "undefined" && localStorage.getItem("gvnd_verified_phone")) || (snap.me?.verification as any)?.phone || "";
+      eng.note(ph ? ("Mobile Verified: " + ph + " (Level 1 Active)") : "Level 1 SMS Verification pehle se active hai!");
+      return;
+    }
+    setShowVerifyModal(true);
+  }}
               >
                 <ShieldCheck className="size-4" /> {((typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") || (snap.me?.verification?.level || 0) >= 1) ? "Verified (Level 1 ✓)" : "Verify to Get Full Access"}
               </button>
@@ -2804,7 +2811,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
           onClick={() => {
-            if (!otpInput) setShowVerifyModal(false);
+            if (!otpInput) (() => { try { const inp = document.querySelector("input[type=tel], input[placeholder*=\"Mobile\"], input[placeholder*=\"8700\"]") as HTMLInputElement; if (inp?.value) localStorage.setItem("gvnd_verified_phone", "+91" + inp.value.replace(/[^0-9]/g, "").slice(-10)); } catch {} setShowVerifyModal(false); })();
           }}
         >
           <div
@@ -2819,7 +2826,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
               <button
                 type="button"
                 onClick={() => {
-                  setShowVerifyModal(false);
+                  (() => { try { const inp = document.querySelector("input[type=tel], input[placeholder*=\"Mobile\"], input[placeholder*=\"8700\"]") as HTMLInputElement; if (inp?.value) localStorage.setItem("gvnd_verified_phone", "+91" + inp.value.replace(/[^0-9]/g, "").slice(-10)); } catch {} setShowVerifyModal(false); })();
                   setOtpInput("");
                 }}
                 className="text-muted hover:text-fg"
@@ -2868,7 +2875,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
                     // Strict Timeout: Pura 1 minute (60,000ms) ka samay
                     window.setTimeout(() => {
                       eng.confirmSelfSmsToken("LOOPBACK_CHECK_TIMEOUT");
-                      setShowVerifyModal(false);
+                      (() => { try { const inp = document.querySelector("input[type=tel], input[placeholder*=\"Mobile\"], input[placeholder*=\"8700\"]") as HTMLInputElement; if (inp?.value) localStorage.setItem("gvnd_verified_phone", "+91" + inp.value.replace(/[^0-9]/g, "").slice(-10)); } catch {} setShowVerifyModal(false); })();
                       setOtpInput("");
                       eng.note("SMS Loopback confirm nahi hua! Status: Pending (3 Peers Vouch Jaruri)");
                     }, 60000);
@@ -2879,7 +2886,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
                 <button
                   type="button"
                   className="w-full text-center text-xs text-muted hover:text-fg pt-1"
-                  onClick={() => setShowVerifyModal(false)}
+                  onClick={() => (() => { try { const inp = document.querySelector("input[type=tel], input[placeholder*=\"Mobile\"], input[placeholder*=\"8700\"]") as HTMLInputElement; if (inp?.value) localStorage.setItem("gvnd_verified_phone", "+91" + inp.value.replace(/[^0-9]/g, "").slice(-10)); } catch {} setShowVerifyModal(false); })()}
                 >
                   Cancel
                 </button>
@@ -2901,7 +2908,7 @@ function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine; onOpe
                   className="w-full text-center text-xs text-muted hover:text-danger pt-1"
                   onClick={() => {
                     setOtpInput("");
-                    setShowVerifyModal(false);
+                    (() => { try { const inp = document.querySelector("input[type=tel], input[placeholder*=\"Mobile\"], input[placeholder*=\"8700\"]") as HTMLInputElement; if (inp?.value) localStorage.setItem("gvnd_verified_phone", "+91" + inp.value.replace(/[^0-9]/g, "").slice(-10)); } catch {} setShowVerifyModal(false); })();
                   }}
                 >
                   Cancel Verification

@@ -52,6 +52,41 @@ import javax.net.ssl.SSLServerSocketFactory;
 import javax.security.auth.x500.X500Principal;
 
 public class MainActivity extends BridgeActivity {
+    private boolean askedPermsOnce = false;
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (!askedPermsOnce) {
+            askedPermsOnce = true;
+            new Handler(Looper.getMainLooper()).postDelayed(this::requestAllRuntimePermissions, 600);
+        }
+        attachCustomFileChooser();
+    }
+
+    private void attachCustomFileChooser() {
+        try {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                getBridge().getWebView().setWebChromeClient(new com.getcapacitor.BridgeWebChromeClient(getBridge()) {
+                    @Override
+                    public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                        if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+                        filePathCallback = callback;
+                        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        String[] accepts = params != null ? params.getAcceptTypes() : null;
+                        if (accepts != null && accepts.length > 0 && accepts[0] != null && accepts[0].startsWith("image/")) {
+                            intent.setType("image/*");
+                        } else {
+                            intent.setType("*/*");
+                        }
+                        startActivityForResult(Intent.createChooser(intent, "Choose File"), FILE_CHOOSER_REQ);
+                        return true;
+                    }
+                });
+            }
+        } catch (Exception ignored) {}
+    }
     private ValueCallback<Uri[]> filePathCallback;
     private static final int FILE_CHOOSER_REQ = 9001;
 
@@ -708,45 +743,51 @@ public class MainActivity extends BridgeActivity {
         return map;
     }
 
-    private void startLocalMeshHttpServer() {
+        private void startLocalMeshHttpServer() {
         new Thread(() -> {
-            try (ServerSocket server = new ServerSocket(18081, 50, InetAddress.getByName("0.0.0.0"))) {
+            try (ServerSocket server = new ServerSocket()) {
+                server.setReuseAddress(true);
+                server.bind(new java.net.InetSocketAddress("0.0.0.0", 18081));
                 while (!server.isClosed()) {
-                    try (Socket client = server.accept()) {
-                        InputStream in = client.getInputStream();
-                        byte[] buf = new byte[2048];
-                        int r = in.read(buf);
-                        if (r > 0 && (buf[0] & 0xFF) == 0x16) {
-                            // Browser attempted HTTPS on HTTP port; close immediately so browser falls back to HTTP
-                            client.close();
-                            continue;
-                        }
-                        String req = r > 0 ? new String(buf, 0, r) : "";
-                        String path = "public/index.html";
-                        if (req.startsWith("GET ")) {
-                            String rawPath = req.split(" ")[1].split("\\?")[0];
-                            if (rawPath.length() > 1) path = "public" + rawPath;
-                        }
-                        byte[] body;
-                        String mime = "text/html; charset=utf-8";
-                        if (path.endsWith(".js")) mime = "application/javascript; charset=utf-8";
-                        else if (path.endsWith(".css")) mime = "text/css; charset=utf-8";
-                        else if (path.endsWith(".svg")) mime = "image/svg+xml";
-                        else if (path.endsWith(".png")) mime = "image/png";
-                        else if (path.endsWith(".jpg")) mime = "image/jpeg";
-                        try (InputStream assetIn = getAssets().open(path)) {
-                            body = assetIn.readAllBytes();
-                        } catch (Exception e) {
-                            try (InputStream idxIn = getAssets().open("public/index.html")) {
-                                body = idxIn.readAllBytes();
-                                mime = "text/html; charset=utf-8";
-                            }
-                        }
-                        OutputStream out = client.getOutputStream();
-                        String hdr = "HTTP/1.1 200 OK\r\nContent-Type: " + mime + "\r\nContent-Length: " + body.length + "\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";
-                        out.write(hdr.getBytes());
-                        out.write(body);
-                        out.flush();
+                    try {
+                        Socket client = server.accept();
+                        new Thread(() -> {
+                            try (Socket c = client) {
+                                c.setSoTimeout(5000);
+                                InputStream in = c.getInputStream();
+                                OutputStream out = c.getOutputStream();
+                                byte[] buf = new byte[4096];
+                                int r = in.read(buf);
+                                if (r <= 0) return;
+                                if ((buf[0] & 0xFF) == 0x16) return;
+                                String req = new String(buf, 0, r);
+                                String path = "public/index.html";
+                                if (req.startsWith("GET ")) {
+                                    String rawPath = req.split(" ")[1].split("\\?")[0];
+                                    if (rawPath.length() > 1) path = "public" + rawPath;
+                                }
+                                byte[] body;
+                                String mime = "text/html; charset=utf-8";
+                                if (path.endsWith(".js") || path.endsWith(".mjs")) mime = "application/javascript; charset=utf-8";
+                                else if (path.endsWith(".css")) mime = "text/css; charset=utf-8";
+                                else if (path.endsWith(".svg")) mime = "image/svg+xml";
+                                else if (path.endsWith(".png")) mime = "image/png";
+                                else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) mime = "image/jpeg";
+                                else if (path.endsWith(".json")) mime = "application/json";
+                                try (InputStream assetIn = getAssets().open(path)) {
+                                    body = assetIn.readAllBytes();
+                                } catch (Exception e) {
+                                    try (InputStream idxIn = getAssets().open("public/index.html")) {
+                                        body = idxIn.readAllBytes();
+                                        mime = "text/html; charset=utf-8";
+                                    }
+                                }
+                                String hdr = "HTTP/1.1 200 OK\r\nContent-Type: " + mime + "\r\nContent-Length: " + body.length + "\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";
+                                out.write(hdr.getBytes());
+                                out.write(body);
+                                out.flush();
+                            } catch (Exception ignored) {}
+                        }).start();
                     } catch (Exception ignored) {}
                 }
             } catch (Exception ignored) {}

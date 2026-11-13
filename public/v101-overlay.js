@@ -1,8 +1,18 @@
 (function () {
-  if (window.__gvndV108Clean) return;
-  window.__gvndV108Clean = true;
+  if (window.__gvndV109Final) return;
+  window.__gvndV109Final = true;
 
-  function checkAndCloseLoopbackModal() {
+  document.addEventListener("click", function () {
+    try {
+      const inp = document.querySelector('input[type="tel"], input[placeholder*="Mobile"], input[placeholder*="8700"]');
+      if (inp && inp.value) {
+        const d = String(inp.value).replace(/[^0-9]/g, "").slice(-10);
+        if (d.length === 10) localStorage.setItem("gvnd_verified_phone", "+91" + d);
+      }
+    } catch (e) {}
+  }, true);
+
+  function syncVerifyState() {
     const ok = localStorage.getItem("gvnd_sms_verified") === "1" ||
       (window.AndroidBridge && window.AndroidBridge.isSmsVerified && window.AndroidBridge.isSmsVerified());
     if (!ok) return;
@@ -12,9 +22,6 @@
     if (cancelBtn) cancelBtn.click();
   }
 
-  setInterval(checkAndCloseLoopbackModal, 1200);
-  window.addEventListener("gvnd-sms-verified", function () {
-    localStorage.setItem("gvnd_sms_verified", "1");
-    checkAndCloseLoopbackModal();
-  });
+  setInterval(syncVerifyState, 1200);
+  window.addEventListener("gvnd-sms-verified", syncVerifyState);
 })();
