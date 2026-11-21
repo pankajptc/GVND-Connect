@@ -636,7 +636,7 @@ public class MainActivity extends BridgeActivity {
                         if (!mid.isEmpty() && liveSyncMsgs.containsKey(mid)) {
                             try { liveSyncMsgs.get(mid).put("status", st); } catch (Exception ignored) {}
                         }
-                        sendJson(client, "{"ok":true}");
+                        sendJson(client, "{\"ok\":true}");
                         return;
                     }
                     if ("sync".equals(action)) {
