@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import "./styles.css";
 import { MeshApp } from "./components/mesh/MeshApp";
 
 if (import.meta.env.PROD || (typeof window !== "undefined" && Boolean((window as any).Capacitor))) {

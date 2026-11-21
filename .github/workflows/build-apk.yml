@@ -51,6 +51,7 @@ jobs:
       - name: Build Signed Release APK v1.1.2 (Fixed Deterministic Certificate)
         run: |
           cd android/app
+          if [ ! -f gvnd-release.jks ]; then
           python3 - << 'PY'
           import subprocess
           # Deterministic RSA-2048 key using fixed seed via OpenSSL rand file so SHA-256 cert never changes across CI runs
@@ -60,6 +61,7 @@ jobs:
           subprocess.run(["openssl", "req", "-new", "-x509", "-key", "key.pem", "-out", "cert.pem", "-days", "10000", "-subj", "/CN=GVND Connect/OU=Mesh/O=GVND/L=Meerut/ST=UP/C=IN"], check=True)
           subprocess.run(["openssl", "pkcs12", "-export", "-in", "cert.pem", "-inkey", "key.pem", "-out", "gvnd-release.jks", "-name", "gvndkey", "-passout", "pass:gvndconnect"], check=True)
           PY
+          fi
           cd ..
           chmod +x gradlew
           ./gradlew assembleRelease

@@ -1,35 +1,8 @@
 import fs from "node:fs";
-const outDir = ".output/public";
-if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-const assets = fs.existsSync(`${outDir}/assets`) ? fs.readdirSync(`${outDir}/assets`) : [];
-const css = assets.find((f) => f.endsWith(".css"));
-const js = assets.find((f) => f.startsWith("index-") && f.endsWith(".js"));
+import { execSync } from "node:child_process";
 
-let html = "";
-if (fs.existsSync("index.html")) {
-  html = fs.readFileSync("index.html", "utf8").replace(
-    /<script type="module" src="\/src\/main\.tsx"><\/script>/,
-    (css ? `<link rel="stylesheet" href="/assets/${css}">\n    ` : "") +
-    (js ? `<script type="module" src="/assets/${js}"></script>` : "")
-  );
-} else {
-  html = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b141a" />
-    <title>GVND Connect</title>
-    <link rel="icon" href="/favicon.svg" />
-    ${css ? `<link rel="stylesheet" href="/assets/${css}" />` : ""}
-  </head>
-  <body class="bg-bg text-fg antialiased">
-    <div id="root"></div>
-    ${js ? `<script type="module" src="/assets/${js}"></script>` : ""}
-  </body>
-</html>
-`;
+execSync("npx vite build --config vite.cap.config.ts", { stdio: "inherit" });
+if (fs.existsSync(".output/public/cap-index.html")) {
+  fs.copyFileSync(".output/public/cap-index.html", ".output/public/index.html");
 }
-
-fs.writeFileSync(`${outDir}/index.html`, html);
-console.log("✅ Prepared .output/public/index.html with:", js, css);
+console.log("✅ Built standalone Capacitor SPA into .output/public/index.html");
