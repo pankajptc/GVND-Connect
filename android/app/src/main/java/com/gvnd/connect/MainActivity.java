@@ -652,8 +652,8 @@ public class MainActivity extends BridgeActivity {
                                 JSONObject m = outbox.optJSONObject(i);
                                 if (m != null && !m.optString("id").isEmpty()) {
                                     String mid = m.optString("id");
-                                    JSONObject prev = liveSyncMsgs.get(mid);
-                                    String prevSt = prev != null ? prev.optString("status", "") : "";
+                                    JSONObject prevLive = liveSyncMsgs.get(mid);
+                                    String prevSt = prevLive != null ? prevLive.optString("status", "") : "";
                                     String curSt = m.optString("status", "sent");
                                     String finalSt = "read".equals(prevSt) ? "read" : "delivered".equals(prevSt) ? "delivered" : ("queued".equals(curSt) ? "sent" : curSt);
                                     try { m.put("status", finalSt); } catch (Exception ignored) {}
