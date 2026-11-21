@@ -321,17 +321,43 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
-        public void saveAndOpenFile(String base64Data, String fileName, String mimeType) {
+        public String saveAndOpenFile(String base64Data, String fileName, String mimeType) {
             try {
                 String cleanB64 = base64Data.contains(",") ? base64Data.split(",", 2)[1] : base64Data;
                 byte[] bytes = android.util.Base64.decode(cleanB64, android.util.Base64.DEFAULT);
-                File dir = new File(getExternalFilesDir(null), "GVND_Downloads");
-                if (!dir.exists()) dir.mkdirs();
-                File out = new File(dir, fileName);
+                String safeMime = (mimeType != null && !mimeType.isEmpty()) ? mimeType : "application/octet-stream";
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    android.content.ContentValues values = new android.content.ContentValues();
+                    values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                    values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, safeMime);
+                    values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/GVND-Connect");
+                    android.net.Uri uri = getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (uri != null) {
+                        try (java.io.OutputStream os = getContentResolver().openOutputStream(uri)) {
+                            if (os != null) os.write(bytes);
+                        }
+                        return "Downloads/GVND-Connect/" + fileName;
+                    }
+                }
+                File pubDir = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "GVND-Connect");
+                if (!pubDir.exists()) pubDir.mkdirs();
+                File out = new File(pubDir, fileName);
                 try (FileOutputStream fos = new FileOutputStream(out)) {
                     fos.write(bytes);
                 }
-            } catch (Exception ignored) {}
+                android.media.MediaScannerConnection.scanFile(MainActivity.this, new String[]{out.getAbsolutePath()}, null, null);
+                return "Downloads/GVND-Connect/" + fileName;
+            } catch (Exception e) {
+                try {
+                    String cleanB64 = base64Data.contains(",") ? base64Data.split(",", 2)[1] : base64Data;
+                    byte[] bytes = android.util.Base64.decode(cleanB64, android.util.Base64.DEFAULT);
+                    File fallback = new File(getExternalFilesDir(null), fileName);
+                    try (FileOutputStream fos = new FileOutputStream(fallback)) { fos.write(bytes); }
+                    return fallback.getAbsolutePath();
+                } catch (Exception ignored) {
+                    return "";
+                }
+            }
         }
     }
 

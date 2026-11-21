@@ -26,7 +26,8 @@ export function ContactsPane({
   eng: MeshEngine;
   onOpen: (tag: string) => void;
 }) {
-  const [contactLimit, setContactLimit] = useState(40);
+  const [contactLimit, setContactLimit] = useState(50);
+  const loadMoreContactsRef = useRef<HTMLDivElement>(null);
   const [contactSearch, setContactSearch] = useState("");
   const [tabMode, setTabMode] = useState<"phone" | "handle">("phone");
   const [phoneName, setPhoneName] = useState("");
@@ -406,12 +407,17 @@ export function ContactsPane({
 
       <div>
         <h4 className="mb-2 px-1 text-xs font-semibold text-muted">Saved Contacts ({snap.contacts.length})</h4>
-          <input type="text" value={contactSearch} onChange={(e) => { setContactSearch(e.target.value); setContactLimit(40); }} placeholder="Search contacts by name or number..." className="w-full rounded-xl border border-border bg-bg px-3 py-2 text-xs text-fg outline-none focus:border-primary" />
+          <input type="text" value={contactSearch} onChange={(e) => { setContactSearch(e.target.value); setContactLimit(50); }} placeholder="Search contacts by name or number..." className="w-full rounded-xl border border-border bg-bg px-3 py-2 text-xs text-fg outline-none focus:border-primary" />
         {snap.contacts.length === 0 ? (
           <Empty icon={Users} title="Koi contact nahi" body="Mobile number ya handle daal kar contact add karein." />
-        ) : (
+        ) : (() => {
+          const filteredContacts = snap.contacts.filter((c) => !contactSearch.trim() || c.name.toLowerCase().includes(contactSearch.toLowerCase()) || c.tag.toLowerCase().includes(contactSearch.toLowerCase()));
+          const visibleContacts = filteredContacts.slice(0, contactLimit);
+          const hasMoreContacts = visibleContacts.length < filteredContacts.length;
+          return (
+          <>
           <ul className="divide-y divide-border rounded-xl border border-border bg-surface overflow-hidden">
-            {snap.contacts.filter((c) => !contactSearch.trim() || c.name.toLowerCase().includes(contactSearch.toLowerCase()) || c.tag.toLowerCase().includes(contactSearch.toLowerCase())).slice(0, contactLimit).map((c) => {
+            {visibleContacts.map((c) => {
               const isLive = snap.peers.some((p) => sameUid(p.globalId, c.tag));
               return (
                 <li key={String(c.tag || "").startsWith("phone:") ? (String(c.tag).replace("phone:", "") + " • Not on Mesh (Tap to Invite)") : c.tag} className="flex items-center gap-3 p-3 hover:bg-elevated/40">
@@ -443,7 +449,37 @@ export function ContactsPane({
               );
             })}
           </ul>
-        )}
+          <div
+            ref={(el) => {
+              if (!el || !hasMoreContacts) return;
+              const obs = new IntersectionObserver(
+                (entries) => {
+                  if (entries[0]?.isIntersecting) {
+                    setContactLimit((prev) => prev + 50);
+                  }
+                },
+                { rootMargin: "200px" }
+              );
+              obs.observe(el);
+            }}
+            className="mt-2 flex flex-col items-center justify-center gap-1.5 py-2 text-center"
+          >
+            <div className="text-[11px] text-muted">
+              Showing <b className="text-fg">{visibleContacts.length}</b> of <b className="text-fg">{filteredContacts.length}</b> contacts
+            </div>
+            {hasMoreContacts && (
+              <button
+                type="button"
+                onClick={() => setContactLimit((prev) => prev + 50)}
+                className="rounded-xl border border-primary/40 bg-primary/15 px-4 py-2 text-xs font-semibold text-primary hover:bg-primary/25"
+              >
+                Load Next 50 Contacts ({Math.min(50, filteredContacts.length - visibleContacts.length)} more)
+              </button>
+            )}
+          </div>
+          </>
+          );
+        })()}
       </div>
     </div>
   );
@@ -496,6 +532,7 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
   const [showDevicesModal, setShowDevicesModal] = useState(false);
   const [selfPhoneInput, setSelfPhoneInput] = useState("");
   const [otpInput, setOtpInput] = useState("");
+  const [lastBackupPath, setLastBackupPath] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const mine = snap.posts.filter((p) => sameUid(p.globalId, snap.me.globalId) && !p.deleted).length;
@@ -554,7 +591,12 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
 
           {/* Right Red Circle Area: Profile Picture Selector */}
           <div className="relative shrink-0">
-            <label className="relative grid size-16 cursor-pointer place-items-center rounded-full border-2 border-dashed border-primary/40 bg-surface shadow-md hover:border-primary transition-all overflow-hidden group">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="relative grid size-16 cursor-pointer place-items-center rounded-full border-2 border-dashed border-primary/40 bg-surface shadow-md hover:border-primary transition-all overflow-hidden group active:scale-95"
+              aria-label="Upload Profile Photo"
+            >
               {(snap.me as any).avatarUrl ? (
                 <img
                   src={(snap.me as any).avatarUrl}
@@ -567,16 +609,18 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
                   <span className="text-[9px] font-medium mt-0.5">Photo</span>
                 </div>
               )}
-              <input
-                type="file"
-                accept="image/*,video/*,audio/*"
-                className="sr-only pointer-events-none"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void (eng as any).setAvatarFile(file);
-                }}
-              />
-            </label>
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void (eng as any).setAvatarFile(file);
+              }}
+            />
           </div>
         </div>
 
@@ -607,12 +651,25 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
                 return;
               }
               const vaultJson = await (eng as any).exportEncryptedGvndFile(pwd);
-              const blob = new Blob([vaultJson], { type: "application/json" });
+              const fileName = `gvnd-${snap.me.handle || "node"}-backup.gvnd`;
+              if (typeof window !== "undefined" && (window as any).AndroidBridge?.saveAndOpenFile) {
+                const b64 = btoa(unescape(encodeURIComponent(vaultJson)));
+                const savedPath = String((window as any).AndroidBridge.saveAndOpenFile(b64, fileName, "application/octet-stream") || "");
+                if (savedPath) {
+                  setLastBackupPath(savedPath);
+                  eng.note(`Backup saved: ${savedPath}`);
+                  return;
+                }
+              }
+              const blob = new Blob([vaultJson], { type: "application/octet-stream" });
               const a = document.createElement("a");
               a.href = URL.createObjectURL(blob);
-              a.download = `gvnd-${snap.me.handle || "node"}-backup.gvnd`;
+              a.download = fileName;
+              document.body.appendChild(a);
               a.click();
-              eng.note("Encrypted .gvnd backup file download ho gayi!");
+              a.remove();
+              setLastBackupPath(`Downloads/${fileName}`);
+              eng.note(`Encrypted backup saved: Downloads/${fileName}`);
             }}
             className="rounded-xl bg-primary px-3 py-2.5 text-xs font-semibold text-primary-fg"
           >
@@ -638,6 +695,11 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
             />
           </label>
         </div>
+        {lastBackupPath && (
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-300 break-all">
+            ✅ Backup File Saved: <b className="font-mono">{lastBackupPath}</b>
+          </div>
+        )}
         <div className="flex items-center justify-between border-t border-border pt-2 text-[11px] text-muted">
           <span>Auto-Vouches: <b className="text-fg">{snap.me.verification?.vouchedBy?.length || 0}</b> (10+ par score badhta hai)</span>
           <span className={`font-bold tabular-nums ${trustScore >= 75 ? "text-emerald-400" : trustScore >= 40 ? "text-amber-400" : "text-rose-400"}`}>

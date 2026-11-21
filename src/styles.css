@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@source not "../android";
+@source not "../.output";
+@source not "../node_modules";
 
 @theme {
   --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
