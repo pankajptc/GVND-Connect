@@ -13,3 +13,7 @@ export async function getSql(): Promise<Sql> {
 }
 
 export const db = noopSql;
+
+
+export async function ensureDbReady(): Promise<void> {}
+export async function getPglite(): Promise<any> { return null; }

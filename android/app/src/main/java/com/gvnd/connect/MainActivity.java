@@ -113,6 +113,8 @@ public class MainActivity extends BridgeActivity {
     private static final ConcurrentHashMap<String, ConcurrentHashMap<String, JSONObject>> rooms = new ConcurrentHashMap<>();
     private static final CopyOnWriteArrayList<JSONObject> signals = new CopyOnWriteArrayList<>();
     private static final ConcurrentHashMap<String, CopyOnWriteArrayList<JSONObject>> meshMail = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, JSONObject> liveSyncPeers = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, JSONObject> liveSyncMsgs = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, byte[]> mediaBlobs = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, String> mediaTypes = new ConcurrentHashMap<>();
     private static final CopyOnWriteArrayList<String> discoveredNodes = new CopyOnWriteArrayList<>();
@@ -123,7 +125,6 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        startLocalMeshHttpServer();
         if (getBridge() != null && getBridge().getWebView() != null) {
             getBridge().getWebView().setWebChromeClient(new WebChromeClient() {
                 @Override
@@ -347,7 +348,7 @@ public class MainActivity extends BridgeActivity {
                     InetAddress inetAddress = enumIpAddr.nextElement();
                     if (!inetAddress.isLoopbackAddress() && inetAddress instanceof Inet4Address) {
                         String ip = inetAddress.getHostAddress();
-                        if (ip.startsWith("192.168.43.") || ip.startsWith("192.168.137.")) return ip;
+                        if (name.contains("ap") || name.contains("swlan") || name.contains("wlan1") || ip.endsWith(".1")) return ip;
                         if (name.contains("ap") || name.contains("swlan") || name.contains("wlan")) {
                             if (ip.startsWith("192.168.")) apIp = ip;
                         }
@@ -626,6 +627,58 @@ public class MainActivity extends BridgeActivity {
             }
 
             if ("/api/mesh".equals(path)) {
+                if ("POST".equals(method)) {
+                    JSONObject b = bodyStr.isEmpty() ? new JSONObject() : new JSONObject(bodyStr);
+                    String action = b.optString("action", "");
+                    if ("ack".equals(action)) {
+                        String mid = b.optString("id", "");
+                        String st = b.optString("status", "delivered");
+                        if (!mid.isEmpty() && liveSyncMsgs.containsKey(mid)) {
+                            try { liveSyncMsgs.get(mid).put("status", st); } catch (Exception ignored) {}
+                        }
+                        sendJson(client, "{"ok":true}");
+                        return;
+                    }
+                    if ("sync".equals(action)) {
+                        long now = System.currentTimeMillis();
+                        JSONObject peerObj = b.optJSONObject("peer");
+                        if (peerObj != null && !peerObj.optString("globalId").isEmpty()) {
+                            try { peerObj.put("lastSeen", now); } catch (Exception ignored) {}
+                            liveSyncPeers.put(peerObj.optString("globalId").toLowerCase(), peerObj);
+                        }
+                        JSONArray outbox = b.optJSONArray("outbox");
+                        if (outbox != null) {
+                            for (int i = 0; i < outbox.length(); i++) {
+                                JSONObject m = outbox.optJSONObject(i);
+                                if (m != null && !m.optString("id").isEmpty()) {
+                                    String mid = m.optString("id");
+                                    JSONObject prev = liveSyncMsgs.get(mid);
+                                    String prevSt = prev != null ? prev.optString("status", "") : "";
+                                    String curSt = m.optString("status", "sent");
+                                    String finalSt = "read".equals(prevSt) ? "read" : "delivered".equals(prevSt) ? "delivered" : ("queued".equals(curSt) ? "sent" : curSt);
+                                    try { m.put("status", finalSt); } catch (Exception ignored) {}
+                                    liveSyncMsgs.put(mid, m);
+                                }
+                            }
+                        }
+                        JSONArray peersArr = new JSONArray();
+                        for (Map.Entry<String, JSONObject> e : liveSyncPeers.entrySet()) {
+                            if (now - e.getValue().optLong("lastSeen", 0) > 60000) {
+                                liveSyncPeers.remove(e.getKey());
+                            } else {
+                                peersArr.put(e.getValue());
+                            }
+                        }
+                        JSONArray msgsArr = new JSONArray();
+                        for (JSONObject m : liveSyncMsgs.values()) msgsArr.put(m);
+                        JSONObject syncRes = new JSONObject();
+                        syncRes.put("ok", true);
+                        syncRes.put("peers", peersArr);
+                        syncRes.put("messages", msgsArr);
+                        sendJson(client, syncRes.toString());
+                        return;
+                    }
+                }
                 String uid = q.getOrDefault("uid", "global");
                 if ("POST".equals(method)) {
                     JSONObject b = bodyStr.isEmpty() ? new JSONObject() : new JSONObject(bodyStr);

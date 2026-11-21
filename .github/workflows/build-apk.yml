@@ -1,4 +1,4 @@
-name: Build GVND Connect APK v1.1.1
+name: Build GVND Connect APK v1.1.2
 
 on:
   push:
@@ -48,7 +48,7 @@ jobs:
           node scripts/prepare-cap-web.mjs
           npx cap sync android
 
-      - name: Build Signed Release APK v1.1.1 (Fixed Deterministic Certificate)
+      - name: Build Signed Release APK v1.1.2 (Fixed Deterministic Certificate)
         run: |
           cd android/app
           python3 - << 'PY'
@@ -64,8 +64,8 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease
 
-      - name: Upload GVND Connect v1.1.1 Signed APK
+      - name: Upload GVND Connect v1.1.2 Signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: GVND-Connect-v1.1.1-Signed-APK
+          name: GVND-Connect-v1.1.2-Signed-APK
           path: android/app/build/outputs/apk/release/app-release.apk

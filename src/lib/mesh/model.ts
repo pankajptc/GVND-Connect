@@ -78,11 +78,17 @@ export type VerificationType = "none" | "sim" | "self_sms" | "peer_vouched";
 export type VerificationInfo = {
   verified: boolean;
   type: VerificationType;
-  level: 0 | 1 | 2; // 0: Hardware bind only, 1: Self-SMS, 2: 2+ Peers Vouched
-  phone?: string; // Real mobile number (Level 1 ya Level 2 me display hoga)
-  phoneHash?: string; // Search matching ke liye
+  level: 0 | 1 | 2;
+  trustScore?: number; // 0 to 100 community trust score
+  phone?: string;
+  phoneHash?: string;
   verifiedAt?: number;
-  vouchedBy?: string[]; // Vouch karne wale peer IDs
+  vouchedBy?: string[];
+  watchReports?: string[];
+  slashed?: boolean;
+  selfSmsSig?: string;
+  signerPubKey?: JsonWebKey;
+  vouchProofs?: { voucher: string; pubKey: JsonWebKey; sig: string; targetHash?: string; at: number }[];
 };
 
 export type Identity = {
@@ -99,6 +105,7 @@ export type Identity = {
   publicKey: JsonWebKey;
   privateKey: JsonWebKey;
   verification?: VerificationInfo;
+  createdAt?: number;
 };
 
 export type PublicIdentity = Omit<Identity, "privateKey">;
@@ -110,6 +117,9 @@ export type Peer = {
   at: number;
   verification?: VerificationInfo;
   hasInternetGateway?: boolean;
+  avatarUrl?: string; // peer
+  createdAt?: number;
+  bio?: string;
 };
 
 export const DEFAULT_HUB_KEY = "mrt-demo-key";

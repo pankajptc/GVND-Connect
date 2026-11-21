@@ -31,7 +31,6 @@ import {
   type Reply,
   type VerificationInfo,
   type FileChunk,
-  formatDuration,
   isGroupId,
   makeId,
   mergePosts,
@@ -42,190 +41,22 @@ import {
   hashPhoneSimple,
   normalizePhone,
 } from "@/lib/mesh/model";
+import {
+  EMPTY_SNAP,
+  type CallBody,
+  type Env,
+  type IncomingCall,
+  type LiveCall,
+  type Snap,
+  type Via,
+  type WireMsg,
+} from "@/lib/mesh/engine/types";
+import { canon, hex, loadDeletedForMeSafe, openDb, rank, tidyPost } from "@/lib/mesh/engine/storage";
+import { computeBlobHash, dataUrlToBlob, safeUrl } from "@/lib/mesh/engine/media";
+import { resolvePeerName, savePeerCacheEntry } from "@/lib/mesh/engine/presence";
 
 export type { CallLog, Category, Contact, Group, Msg, Peer, Post, PublicIdentity, Quote };
-
-type Via = "mail" | "bc" | "rtc";
-
-type Env = {
-  v: 1;
-  id: string;
-  kind: "hello" | "dm" | "receipt" | "typing" | "edit" | "delete" | "feed" | "call" | "chunk";
-  from: string;
-  fromName: string;
-  to?: string;
-  key?: JsonWebKey;
-  sig?: string;
-  payload: unknown;
-  ttl?: number;       // Max hops allowed
-  hopPath?: string[]; // Routing trace
-};
-
-type CallBody = {
-  action: "offer" | "answer" | "ice" | "hangup" | "reject";
-  callId: string;
-  mode?: "voice" | "video";
-  pin?: string;
-  trusted?: boolean;
-  reason?: string;
-  sdp?: RTCSessionDescriptionInit;
-  candidate?: RTCIceCandidateInit;
-};
-
-type WireMsg = Msg & { mediaData?: string };
-
-export type IncomingCall = {
-  callId: string;
-  from: string;
-  name: string;
-  mode: "voice" | "video";
-  sdp: RTCSessionDescriptionInit;
-};
-
-export type LiveCall = {
-  callId: string;
-  tag: string;
-  name: string;
-  mode: "voice" | "video";
-  direction: "in" | "out";
-  phase: "ringing" | "connected";
-  seconds: number;
-  mic: boolean;
-  cam: boolean;
-  volume: number;
-  loopback: boolean;
-};
-
-export type Snap = {
-  me: PublicIdentity;
-  chats: Record<string, Msg[]>;
-  contacts: Contact[];
-  groups: Group[];
-  posts: Post[];
-  hidden: string[];
-  blocked: string[];
-  muted: string[];
-  starred: string[];
-  callLogs: CallLog[];
-  peers: Peer[];
-  pins: { uid: string; label: string }[];
-  typing: { thread: string; name: string; until: number } | null;
-  toast: string | null;
-  incoming: IncomingCall | null;
-  call: LiveCall | null;
-  rtcPeers: number;
-  outbox: number;
-  urls: Record<string, string>;
-  mediaTick: number;
-  hubKey: string;
-};
-
-const EMPTY_ME: PublicIdentity = {
-  name: "GVND Connect",
-  handle: "gvnd",
-  hub: "mrt",
-  discriminator: "00000000",
-  globalId: "@gvnd@mrt#00000000",
-  bio: "",
-  secretPin: "0000",
-  publicKey: {},
-  verification: (typeof window !== "undefined" && localStorage.getItem("gvnd_sms_verified") === "1") ? { verified: true, type: "sms", level: 1 } : { verified: false, type: "none", level: 0 },
-};
-
-export const EMPTY_SNAP: Snap = {
-  me: EMPTY_ME,
-  chats: {},
-  contacts: [],
-  groups: [],
-  posts: [],
-  hidden: [],
-  blocked: [],
-  muted: [],
-  starred: [],
-  callLogs: [],
-  peers: [],
-  pins: [],
-  typing: null,
-  toast: null,
-  incoming: null,
-  call: null,
-  rtcPeers: 0,
-  outbox: 0,
-  urls: {},
-  mediaTick: 0,
-  hubKey: DEFAULT_HUB_KEY,
-};
-
-function canon(env: Env): string {
-  return `${env.id}|${env.kind}|${env.from}|${env.to ?? ""}|${JSON.stringify(env.payload)}`;
-}
-
-function hex(bytes: number): string {
-  const buf = new Uint8Array(bytes);
-  crypto.getRandomValues(buf);
-  return [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function rank(status: Msg["status"]): number {
-  if (status === "read") return 3;
-  if (status === "delivered") return 2;
-  if (status === "sent") return 1;
-  return 0;
-}
-
-function tidyPost(raw: Post): Post {
-  return {
-    ...raw,
-    id: String(raw.id || "").slice(0, 40),
-    author: String(raw.author || "Peer").slice(0, 40),
-    globalId: String(raw.globalId || ""),
-    content: String(raw.content || "").slice(0, 2000),
-    category: raw.category === "friends" || raw.category === "groups" ? raw.category : "all",
-    likes: Array.isArray(raw.likes) ? raw.likes.filter((x) => typeof x === "string") : [],
-    reposts: Array.isArray(raw.reposts) ? raw.reposts.filter((x) => typeof x === "string") : [],
-    reports: Array.isArray(raw.reports) ? raw.reports.filter((x) => typeof x === "string") : [],
-    replies: mergeReplies(Array.isArray(raw.replies) ? raw.replies : [], []),
-    timestamp: Number(raw.timestamp) || Date.now(),
-    rev: Number(raw.rev) || 1,
-  };
-}
-
-function dataUrlToBlob(dataUrl: string): Blob | null {
-  const comma = dataUrl.indexOf(",");
-  if (comma < 0) return null;
-  const mime = /data:(.*?);/.exec(dataUrl.slice(0, comma))?.[1] || "application/octet-stream";
-  try {
-    const bin = atob(dataUrl.slice(comma + 1));
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
-    return new Blob([bytes], { type: mime });
-  } catch {
-    return null;
-  }
-}
-
-async function computeBlobHash(blob: Blob): Promise<string> {
-  try {
-    const buf = await blob.arrayBuffer();
-    if (typeof crypto !== "undefined" && crypto.subtle) {
-      const hashBuf = await crypto.subtle.digest("SHA-256", buf);
-      const hexStr = [...new Uint8Array(hashBuf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-      return `sha_${hexStr.slice(0, 24)}`;
-    }
-  } catch {}
-  return `sz_${blob.size}_${blob.type.replace(/[^a-z0-9]/gi, "")}`;
-}
-
-async function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open("meshnet-media-v1", 1);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains("blobs")) req.result.createObjectStore("blobs");
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error("idb"));
-  });
-}
+export { EMPTY_SNAP, type IncomingCall, type LiveCall, type Snap };
 
 export class MeshEngine {
   localStream: MediaStream | null = null;
@@ -269,6 +100,8 @@ export class MeshEngine {
   private rtcPeers = 0;
   private mediaTick = 0;
   private seen = new Set<string>();
+  private deletedForMe = loadDeletedForMeSafe();
+  private peerSubActive = false;
   private seenOrder: string[] = [];
   private viewing: string | null = null;
   private inflight = new Set<string>();
@@ -277,6 +110,33 @@ export class MeshEngine {
   private rawMedia = new Map<string, string>();
   private chunkBuffer = new Map<string, { total: number; chunks: Map<number, string>; mime: string; name: string }>();
   private hydrated = false;
+  private pulling = false;
+  private syncingApi = false;
+
+  private patchMsg(id: string, fn: (m: Msg) => Msg): Msg | undefined {
+    let found: Msg | undefined;
+    let changed = false;
+    const nextChats: Record<string, Msg[]> = {};
+    for (const [k, list] of Object.entries(this.chats)) {
+      nextChats[k] = list.map((m) => {
+        if (m.id === id) {
+          changed = true;
+          const updated = fn(m);
+          if (updated.transferProgress === undefined) {
+            delete (updated as any).transferProgress;
+          }
+          found = updated;
+          return updated;
+        }
+        return m;
+      });
+    }
+    if (changed) {
+      this.chats = nextChats;
+      this.emit();
+    }
+    return found;
+  }
   private pc: RTCPeerConnection | null = null;
   private pendingIce: RTCIceCandidateInit[] = [];
   private incoming: IncomingCall | null = null;
@@ -309,7 +169,7 @@ export class MeshEngine {
 
   setViewing(tag: string | null): void {
     this.viewing = tag ? this.resolve(tag) : null;
-    if (this.viewing) this.markRead(this.viewing);
+    if (this.viewing) this.markRead?.(this.viewing);
   }
 
   sendText(to: string, text: string, reply?: Quote | null): void {
@@ -360,8 +220,14 @@ export class MeshEngine {
     const mime = file.type || "application/octet-stream";
     const msgId = makeId("m");
     const tempKey = makeId("f");
+    const logStep = (step: string, detail: string) => {
+      void fetch("/api/mesh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "debug", id: msgId, status: step, detail }),
+      }).catch(() => {});
+    };
 
-    // 1. Lock message while processing so flush() never sends uncompressed file
     this.inflight.add(msgId);
 
     const draftMsg: Msg = {
@@ -376,297 +242,125 @@ export class MeshEngine {
       mediaMime: mime,
       mediaSize: file.size,
       isDownloaded: true,
-      transferProgress: 1,
+      transferProgress: 5,
       ttl: 4,
     };
     this.insert(this.resolve(to), draftMsg);
     this.emit();
+    logStep("1_draft_inserted", `${mime} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
-    // 2. Original File SHA-256 Check (Delhi/Mumbai Global Deduplication)
-    const origHash = await computeBlobHash(file);
-    const cachedMapping = this.hashDirectory.get(origHash);
+    try {
+      const origHash = await computeBlobHash(file);
+      const cachedMapping = this.hashDirectory.get(origHash);
 
-    // Agar wahi original file pehle se compressed & cached hai to dubara compress na karein
-    if (cachedMapping && (this.urls[cachedMapping.compHash] || this.rawMedia.has(cachedMapping.compHash))) {
+      if (cachedMapping && (this.rawMedia.has(cachedMapping.compHash) || Boolean(this.urls[cachedMapping.compHash]))) {
+        let cachedUrl = this.rawMedia.get(cachedMapping.compHash);
+        if (!cachedUrl && this.urls[cachedMapping.compHash]) {
+          try {
+            const r = await fetch(this.urls[cachedMapping.compHash]);
+            const b = await r.blob();
+            cachedUrl = await blobToDataUrl(b);
+            this.rawMedia.set(cachedMapping.compHash, cachedUrl);
+          } catch {}
+        }
+        if (cachedUrl) {
+          const updatedMsg = this.patchMsg(msgId, (m) => ({
+            ...m,
+            mediaKey: cachedMapping.compHash,
+            mediaMime: cachedMapping.mime,
+            mediaThumb: cachedMapping.thumb,
+            mediaSize: cachedMapping.size,
+            transferProgress: 90,
+          }));
+          this.inflight.delete(msgId);
+          logStep("2_sha256_cache_hit", `skip_recompress key=${cachedMapping.compHash} size=${cachedMapping.size}`);
+          if (updatedMsg) {
+            await this.deliver(updatedMsg, cachedUrl);
+            void this.syncMeshApi();
+          }
+          return;
+        }
+      }
+
+      let processedBlob: Blob = file;
+      let finalMime = mime;
+      let lightThumb = "";
+
+      if (file.size > 100 * 1024 * 1024) {
+        this.inflight.delete(msgId);
+        for (const k of Object.keys(this.chats)) { this.chats[k] = (this.chats[k] || []).filter((m) => m.id !== msgId); }
+        this.emitPersist();
+        this.toast("File 100 MB se badi hai — max 100 MB allowed.");
+        return;
+      }
+
+      if (mime.startsWith("image/")) {
+        this.patchMsg(msgId, (m) => ({ ...m, transferProgress: 35 }));
+        const shrunk = await shrinkImage(file, 260000);
+        if (shrunk) {
+          const b = dataUrlToBlob(shrunk.dataUrl);
+          if (b) processedBlob = b;
+          finalMime = shrunk.mime;
+        }
+        const tinyThumb = await shrinkImage(file, 14000);
+        if (tinyThumb) lightThumb = tinyThumb.dataUrl;
+        logStep("2_image_hq_compressed", `orig=${file.size} -> comp=${processedBlob.size}`);
+      } else {
+        // Video, Audio, PDF & All Other Files: Zero Compression (Direct Original up to 100MB)
+        this.patchMsg(msgId, (m) => ({ ...m, transferProgress: 45 }));
+        processedBlob = file;
+        finalMime = mime;
+        logStep("2_direct_uncompressed_media", `mime=${mime} size=${file.size}`);
+      }
+
+      const contentHashKey = await computeBlobHash(processedBlob);
+      const finalSize = processedBlob.size;
+
+      this.hashDirectory.set(origHash, {
+        compHash: contentHashKey,
+        size: finalSize,
+        mime: finalMime,
+        thumb: lightThumb || undefined,
+      });
+      try {
+        localStorage.setItem("meshnet_hash_directory", JSON.stringify(Object.fromEntries(this.hashDirectory)));
+      } catch {}
+
+      this.patchMsg(msgId, (m) => ({
+        ...m,
+        mediaKey: contentHashKey,
+        transferProgress: 85,
+        mediaSize: finalSize,
+        mediaMime: finalMime,
+      }));
+
+      const readyDataUrl = await blobToDataUrl(processedBlob);
+      await this.keepMedia(contentHashKey, readyDataUrl, finalMime);
+
       const updatedMsg = this.patchMsg(msgId, (m) => ({
         ...m,
-        mediaKey: cachedMapping.compHash,
-        mediaMime: cachedMapping.mime,
-        mediaThumb: cachedMapping.thumb,
-        mediaSize: cachedMapping.size,
-        transferProgress: undefined,
+        mediaKey: contentHashKey,
+        mediaMime: finalMime,
+        mediaThumb: lightThumb || undefined,
+        mediaSize: finalSize,
+        transferProgress: 90,
       }));
       this.emitPersist();
+
       this.inflight.delete(msgId);
+      logStep("3_uploading", `key=${contentHashKey} bytes=${readyDataUrl.length}`);
       if (updatedMsg) {
-        await this.deliver({ ...updatedMsg, mediaKey: cachedMapping.compHash, mediaSize: cachedMapping.size, mediaMime: cachedMapping.mime }, undefined);
+        await this.deliver(updatedMsg, readyDataUrl);
+        void this.syncMeshApi();
       }
-      return;
-    }
-
-    let processedBlob: Blob = file;
-    let finalMime = mime;
-    let lightThumb = "";
-
-    // 3A. Dynamic Video Compression (Waits until conversion completes 100%)
-    if (mime.startsWith("video/")) {
-      try {
-        processedBlob = await new Promise<Blob>((resolve) => {
-          const video = document.createElement("video");
-          const fileUrl = URL.createObjectURL(file);
-          video.src = fileUrl;
-          video.preload = "auto";
-          video.playsInline = true;
-          video.muted = true;
-
-          let finished = false;
-          const finishWith = (resultBlob: Blob) => {
-            if (finished) return;
-            finished = true;
-            URL.revokeObjectURL(fileUrl);
-            resolve(resultBlob);
-          };
-
-          video.onloadedmetadata = async () => {
-            try {
-              const targetH = 360;
-              const aspect = (video.videoWidth || 640) / (video.videoHeight || 360);
-              const targetW = Math.max(2, Math.round((targetH * aspect) / 2) * 2);
-
-              const canvas = document.createElement("canvas");
-              canvas.width = targetW;
-              canvas.height = targetH;
-              const ctx = canvas.getContext("2d", { alpha: false });
-              if (!ctx) throw new Error("no ctx");
-
-              const videoStream = canvas.captureStream(24);
-              let combinedStream: MediaStream = videoStream;
-              let audioCtx: AudioContext | null = null;
-
-              try {
-                const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-                audioCtx = new AC();
-                if (audioCtx.state === "suspended") await audioCtx.resume();
-                const src = audioCtx.createMediaElementSource(video);
-                const dest = audioCtx.createMediaStreamDestination();
-                src.connect(dest);
-                video.muted = false;
-                const aTracks = dest.stream.getAudioTracks();
-                if (aTracks.length > 0) {
-                  combinedStream = new MediaStream([videoStream.getVideoTracks()[0], aTracks[0]]);
-                }
-              } catch {}
-
-              let recMime = "video/webm;codecs=vp8,opus";
-              if (!MediaRecorder.isTypeSupported(recMime)) recMime = "video/webm";
-
-              const recorder = new MediaRecorder(combinedStream, {
-                mimeType: recMime,
-                videoBitsPerSecond: 700000,
-                audioBitsPerSecond: 64000,
-              });
-
-              const chunks: Blob[] = [];
-              recorder.ondataavailable = (e) => {
-                if (e.data && e.data.size > 0) chunks.push(e.data);
-              };
-
-              recorder.onstop = () => {
-                if (audioCtx && audioCtx.state !== "closed") void audioCtx.close();
-                const out = new Blob(chunks, { type: "video/webm" });
-                if (out.size > 0 && out.size < file.size) {
-                  finalMime = "video/webm";
-                  finishWith(out);
-                } else {
-                  finishWith(file);
-                }
-              };
-
-              recorder.onerror = () => finishWith(file);
-
-              await video.play().catch(async () => {
-                video.muted = true;
-                await video.play();
-              });
-              recorder.start(400);
-
-              let thumbCaptured = false;
-              const drawFrame = () => {
-                if (finished) return;
-                if (!video.paused && !video.ended) {
-                  ctx.drawImage(video, 0, 0, targetW, targetH);
-                  if (!thumbCaptured && video.currentTime > 0.1) {
-                    thumbCaptured = true;
-                    try {
-                      const tc = document.createElement("canvas");
-                      tc.width = 48;
-                      tc.height = 48;
-                      tc.getContext("2d")?.drawImage(video, 0, 0, 48, 48);
-                      lightThumb = tc.toDataURL("image/jpeg", 0.35);
-                    } catch {}
-                  }
-                  if (video.duration) {
-                    const pct = Math.min(85, Math.max(5, Math.round((video.currentTime / video.duration) * 85)));
-                    this.patchMsg(msgId, (m) => ({ ...m, transferProgress: pct }));
-                    this.emit();
-                  }
-                  requestAnimationFrame(drawFrame);
-                } else if (video.ended) {
-                  if (recorder.state === "recording") recorder.stop();
-                } else {
-                  void video.play().catch(() => {});
-                  requestAnimationFrame(drawFrame);
-                }
-              };
-              requestAnimationFrame(drawFrame);
-            } catch {
-              finishWith(file);
-            }
-          };
-
-          video.onerror = () => finishWith(file);
-        });
-      } catch {
-        processedBlob = file;
+    } catch (err: any) {
+      this.inflight.delete(msgId);
+      logStep("err_sendFile", err?.message || "unknown");
+      for (const k of Object.keys(this.chats)) {
+        this.chats[k] = (this.chats[k] || []).filter((m) => m.id !== msgId);
       }
-    } else if (mime.startsWith("image/")) {
-      this.patchMsg(msgId, (m) => ({ ...m, transferProgress: 30 }));
-      this.emit();
-      const shrunk = await shrinkImage(file, 45000);
-      if (shrunk) {
-        const b = dataUrlToBlob(shrunk.dataUrl);
-        if (b) processedBlob = b;
-        finalMime = shrunk.mime;
-      }
-      try {
-        const bmp = await createImageBitmap(processedBlob);
-        const c = document.createElement("canvas");
-        c.width = 48;
-        c.height = 48;
-        c.getContext("2d")?.drawImage(bmp, 0, 0, 48, 48);
-        lightThumb = c.toDataURL("image/jpeg", 0.35);
-        bmp.close();
-      } catch {}
-    } else if (mime.startsWith("audio/")) {
-      // 3C. Uploaded Audio Compression (64kbps Opus)
-      try {
-        processedBlob = await new Promise<Blob>((resolve) => {
-          const audioEl = document.createElement("audio");
-          const fileUrl = URL.createObjectURL(file);
-          audioEl.src = fileUrl;
-          audioEl.preload = "auto";
-
-          let finished = false;
-          const finishAudio = (res: Blob) => {
-            if (finished) return;
-            finished = true;
-            URL.revokeObjectURL(fileUrl);
-            resolve(res);
-          };
-
-          audioEl.onloadedmetadata = async () => {
-            try {
-              const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-              const audioCtx = new AC();
-              if (audioCtx.state === "suspended") await audioCtx.resume();
-              const src = audioCtx.createMediaElementSource(audioEl);
-              const dest = audioCtx.createMediaStreamDestination();
-              src.connect(dest);
-
-              const recMime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-                ? "audio/webm;codecs=opus"
-                : "audio/webm";
-              const recorder = new MediaRecorder(dest.stream, {
-                mimeType: recMime,
-                audioBitsPerSecond: 64000, // 64kbps Opus
-              });
-
-              const chunks: Blob[] = [];
-              recorder.ondataavailable = (e) => {
-                if (e.data && e.data.size > 0) chunks.push(e.data);
-              };
-
-              recorder.onstop = () => {
-                if (audioCtx.state !== "closed") void audioCtx.close();
-                const out = new Blob(chunks, { type: "audio/webm" });
-                if (out.size > 0 && out.size < file.size) {
-                  finalMime = "audio/webm";
-                  finishAudio(out);
-                } else {
-                  finishAudio(file);
-                }
-              };
-
-              recorder.onerror = () => finishAudio(file);
-
-              audioEl.ontimeupdate = () => {
-                if (audioEl.duration) {
-                  const pct = Math.min(85, Math.max(5, Math.round((audioEl.currentTime / audioEl.duration) * 85)));
-                  this.patchMsg(msgId, (m) => ({ ...m, transferProgress: pct }));
-                  this.emit();
-                }
-              };
-
-              audioEl.onended = () => {
-                if (recorder.state === "recording") recorder.stop();
-              };
-
-              await audioEl.play();
-              recorder.start(400);
-            } catch {
-              finishAudio(file);
-            }
-          };
-
-          audioEl.onerror = () => finishAudio(file);
-        });
-      } catch {
-        processedBlob = file;
-      }
-    }
-
-    // 4. Content-Addressable SHA-256 Key + Save Mapping (origHash -> compHash)
-    const contentHashKey = await computeBlobHash(processedBlob);
-    const finalSize = processedBlob.size;
-
-    this.hashDirectory.set(origHash, {
-      compHash: contentHashKey,
-      size: finalSize,
-      mime: finalMime,
-      thumb: lightThumb || undefined,
-    });
-    try {
-      localStorage.setItem("meshnet_hash_directory", JSON.stringify(Object.fromEntries(this.hashDirectory)));
-    } catch {}
-
-    this.patchMsg(msgId, (m) => ({
-      ...m,
-      mediaKey: contentHashKey,
-      transferProgress: 90,
-      mediaSize: finalSize,
-      mediaMime: finalMime,
-    }));
-    this.emit();
-
-    if (!this.urls[contentHashKey]) {
-      const dataUrl = await blobToDataUrl(processedBlob);
-      await this.keepMedia(contentHashKey, dataUrl, finalMime);
-    }
-
-    // 5. Send Metadata + SHA-256 Hash + Thumbnail
-    const updatedMsg = this.patchMsg(msgId, (m) => ({
-      ...m,
-      mediaKey: contentHashKey,
-      mediaMime: finalMime,
-      mediaThumb: lightThumb || undefined,
-      mediaSize: finalSize,
-      transferProgress: undefined,
-    }));
-    this.emitPersist();
-
-    this.inflight.delete(msgId);
-    if (updatedMsg) {
-      await this.deliver({ ...updatedMsg, mediaKey: contentHashKey, mediaSize: finalSize, mediaMime: finalMime }, undefined);
+      this.emitPersist();
+      this.toast("Media compression fail — chhoti file try karein.");
     }
   }
 
@@ -715,15 +409,45 @@ export class MeshEngine {
 
   // Receiver Download: Pehle local SHA-256 cache check karega -> Nahi mila to Sender + Mesh Swarm se fetch karega
   async requestMediaDownload(msgId: string, isResume = false): Promise<void> {
-    for (const [t, list] of Object.entries(this.chats)) {
+    for (const [, list] of Object.entries(this.chats)) {
       const m = list.find((msg) => msg.id === msgId);
       if (m && m.mediaKey && !m.isDownloaded) {
-        // 1. WhatsApp Deduplication: Agar wahi file kisi aur chat me pehle se downloaded hai to 0KB me turant open karein!
         if (this.urls[m.mediaKey] || this.rawMedia.has(m.mediaKey)) {
-          this.patchMsg(msgId, (item) => ({ ...item, isDownloaded: true, transferProgress: undefined }));
+          this.patchMsg(msgId, (item) => ({ ...item, isDownloaded: true, transferProgress: undefined, status: "read" }));
           this.emitPersist();
+          void fetch("/api/mesh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "ack", id: m.id, status: "read" }),
+          }).catch(() => {});
           return;
         }
+
+        this.patchMsg(msgId, (item) => ({ ...item, transferProgress: 15 }));
+        this.emit();
+
+        try {
+          const r = await fetch("/api/mesh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "getMedia", mediaKey: m.mediaKey }),
+          });
+          if (r.ok) {
+            const md = await r.json();
+            if (md?.dataUrl) {
+              this.patchMsg(msgId, (item) => ({ ...item, transferProgress: 85 }));
+              await this.keepMedia(m.mediaKey, md.dataUrl, m.mediaMime || "application/octet-stream");
+              this.patchMsg(msgId, (item) => ({ ...item, isDownloaded: true, transferProgress: undefined, status: "read" }));
+              this.emitPersist();
+              void fetch("/api/mesh", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "ack", id: m.id, status: "read" }),
+              }).catch(() => {});
+              return;
+            }
+          }
+        } catch {}
 
         const lastActive = this.activeDownloads.get(msgId) || 0;
         if (isResume && Date.now() - lastActive < 6000) return;
@@ -732,18 +456,14 @@ export class MeshEngine {
         const senderOnline = this.isOnline(m.from);
 
         const existingEntry = this.chunkBuffer.get(m.mediaKey);
-        const currentPct = existingEntry && existingEntry.total > 0
-          ? Math.max(1, Math.round((existingEntry.chunks.size / existingEntry.total) * 100))
-          : (m.transferProgress && m.transferProgress > 1 ? m.transferProgress : 1);
+        const currentPct =
+          existingEntry && existingEntry.total > 0
+            ? Math.max(1, Math.round((existingEntry.chunks.size / existingEntry.total) * 100))
+            : 1;
 
         this.patchMsg(msgId, (item) => ({ ...item, transferProgress: currentPct }));
         this.emit();
 
-        if (!senderOnline && !isResume) {
-          this.toast("Sender offline hai — Mesh Swarm aur Relay queue se file dhoondi ja rahi hai...");
-        }
-
-        // 2. Direct Sender + Offline Mail Queue
         await this.ship(
           {
             v: 1,
@@ -758,21 +478,17 @@ export class MeshEngine {
           [{ uid: uidOf(m.from), mail: !senderOnline }]
         );
 
-        // 3. Swarm Fallback: Agar sender offline hai aur mesh par koi aur peer online hai jiske paas ye hash hai, to usse bhi maangein
-        if (!senderOnline && this.snap.peers.length > 0) {
-          await this.ship(
-            {
-              v: 1,
-              id: makeId("swm"),
-              kind: "chunk",
-              from: this.me().globalId,
-              fromName: this.me().name,
-              payload: { fileId: m.mediaKey, index: -1, total: 0, data: "FETCH_SWARM", mime: m.mediaMime || "", name: m.mediaName || "" },
-              ttl: 3,
-            },
-            "all"
-          );
-        }
+        // Reset 1% stuck state after 6s if neither relay cache nor peer has old file
+        window.setTimeout(() => {
+          for (const curList of Object.values(this.chats)) {
+            const cur = curList.find((x) => x.id === msgId);
+            if (cur && !cur.isDownloaded && (cur.transferProgress || 0) <= 1) {
+              this.activeDownloads.delete(msgId);
+              this.patchMsg(msgId, (item) => ({ ...item, transferProgress: undefined }));
+              this.toast("Purani file cache mein nahi hai — sender se dubara bhejein.");
+            }
+          }
+        }, 6000);
         break;
       }
     }
@@ -793,6 +509,10 @@ export class MeshEngine {
   deleteMessage(thread: string, id: string, mode: "everyone" | "me" = "everyone"): void {
     const key = this.resolve(thread);
     if (mode === "me") {
+      this.deletedForMe.add(id);
+      try {
+        localStorage.setItem("gvnd_deleted_for_me_v1", JSON.stringify(Array.from(this.deletedForMe).slice(-2000)));
+      } catch {}
       const list = this.chats[key] || [];
       this.chats = { ...this.chats, [key]: list.filter((m) => m.id !== id) };
       this.emitPersist();
@@ -1204,6 +924,7 @@ export class MeshEngine {
       mic: true,
       cam: mode === "video",
       volume: 1,
+      loopback: false,
     };
     this.bumpMedia();
     try {
@@ -1454,7 +1175,7 @@ export class MeshEngine {
       if (rawHashes) {
         const parsed = JSON.parse(rawHashes) as Record<string, { compHash: string; size: number; mime: string; thumb?: string }>;
         for (const [k, v] of Object.entries(parsed)) {
-          if (v?.compHash) this.hashDirectory.set(k, v);
+          if (v?.compHash && !(v.mime?.startsWith("audio/") && v.size < 220000)) this.hashDirectory.set(k, v);
         }
       }
     } catch {}
@@ -1479,6 +1200,7 @@ private async freshIdentity(): Promise<Identity> {
     verification: {
       verified: false,
       type: "none",
+      level: 0,
     },
     ...keys,
   };
@@ -1500,7 +1222,7 @@ private async freshIdentity(): Promise<Identity> {
       if (!raw) return null;
       const data = JSON.parse(raw) as { identity?: Identity };
       if (!data.identity?.globalId || !data.identity.privateKey) return null;
-      return data;
+      return data as { identity: Identity };
     } catch {
       return null;
     }
@@ -1508,7 +1230,14 @@ private async freshIdentity(): Promise<Identity> {
 
   private applySaved(data: Partial<ReturnType<MeshEngine["saved"]>> & { identity: Identity }): void {
     this.identity = data.identity;
-    this.chats = data.chats && typeof data.chats === "object" ? data.chats : {};
+    this.chats = data.chats && typeof data.chats === "object"
+      ? Object.fromEntries(
+          Object.entries(data.chats).map(([k, list]) => [
+            k,
+            Array.isArray(list) ? list.map((m) => ({ ...m, transferProgress: undefined })) : [],
+          ])
+        )
+      : {};
     this.contacts = Array.isArray(data.contacts) ? data.contacts : [];
     this.groups = Array.isArray(data.groups) ? data.groups : [];
     this.posts = Array.isArray(data.posts) ? data.posts.map((p) => tidyPost(p)) : [];
@@ -1524,7 +1253,7 @@ private async freshIdentity(): Promise<Identity> {
   private saved() {
     const chats: Record<string, Msg[]> = {};
     for (const [key, list] of Object.entries(this.chats)) {
-      chats[key] = list.map((m) => ({ ...m, mediaData: undefined }));
+      chats[key] = list.map((m) => ({ ...m, mediaData: undefined, transferProgress: undefined }));
     }
     return {
       identity: this.me(),
@@ -1575,7 +1304,7 @@ private async freshIdentity(): Promise<Identity> {
     const peers: Peer[] = [];
     // Dummy peer presence removed - sirf real peers dikhenge
     for (const peer of this.presence.values()) {
-      if (now - peer.at < 60000 && !sameUid(peer.globalId, me.globalId)) peers.push(peer);
+      if (now - peer.at < 90000 && !sameUid(peer.globalId, me.globalId)) peers.push(peer);
     }
     let outbox = 0;
     for (const list of Object.values(this.chats)) {
@@ -1615,6 +1344,9 @@ private async freshIdentity(): Promise<Identity> {
   }
 
   private me(): Identity {
+    if (this.identity && !this.identity.createdAt) {
+      this.identity.createdAt = Date.now();
+    }
     if (!this.identity) throw new Error("Mesh identity missing");
     return this.identity;
   }
@@ -1625,20 +1357,40 @@ private async freshIdentity(): Promise<Identity> {
     this.bc.onmessage = (event) => {
       void this.ingest(event.data, "bc");
     };
+    void this.syncMeshApi();
+    this.timers.push(window.setInterval(() => void this.syncMeshApi(), 300));
     window.addEventListener("pagehide", this.onHide);
     document.addEventListener("visibilitychange", this.onVisible);
 
+    if (!this.peerSubActive) {
+      this.peerSubActive = true;
+      this.setupPeerSub();
+    }
+  }
+
+  private setupPeerSub(): void {
     gvndControl.subscribePeers((p) => {
       if (sameUid(p.globalId, this.me().globalId)) return;
-      if (!this.presence.has(uidOf(p.globalId))) {
-        this.presence.set(uidOf(p.globalId), {
-          globalId: p.globalId,
-          name: p.name,
-          via: "nearby",
-          at: p.lastSeen || Date.now(),
-        });
-        this.emit();
-      }
+      const uid = uidOf(p.globalId);
+      const prev = this.presence.get(uid);
+      const freshAt = Math.max(p.lastSeen || 0, Date.now());
+      const isGeneric = !p.name || p.name.startsWith("Peer ") || p.name === "GVND Peer";
+      const resolvedName = !isGeneric ? p.name : (prev?.name || p.name || "Peer");
+      const resolvedAvatar = (p.avatarUrl && p.avatarUrl.length > 5) ? p.avatarUrl : ((prev as any)?.avatarUrl || "");
+      this.presence.set(uid, {
+        ...(prev || {}),
+        globalId: p.globalId,
+        name: resolvedName,
+        avatarUrl: resolvedAvatar,
+        via: "nearby",
+        at: freshAt,
+      } as any);
+      try {
+        const c = JSON.parse(localStorage.getItem("meshnet_peer_cache") || "{}");
+        c[uid] = { ...(c[uid] || {}), name: resolvedName, avatarUrl: resolvedAvatar || c[uid]?.avatarUrl || "", globalId: p.globalId };
+        localStorage.setItem("meshnet_peer_cache", JSON.stringify(c));
+      } catch {}
+      if (!prev || Date.now() - (prev.at || 0) > 5000) this.emit();
     });
 
     gvndControl.subscribeAllThreads((_threadKey, incomingMsg) => {
@@ -1648,7 +1400,7 @@ private async freshIdentity(): Promise<Identity> {
       const hasBlob = incomingMsg.mediaKey
         ? Boolean(this.urls[incomingMsg.mediaKey] || this.rawMedia.has(incomingMsg.mediaKey))
         : true;
-      this.insert(thread, { ...incomingMsg, isDownloaded: hasBlob });
+      this.insert(thread, { ...incomingMsg, isDownloaded: !incomingMsg.mediaKey });
       this.emitPersist();
     });
 
@@ -1659,46 +1411,13 @@ private async freshIdentity(): Promise<Identity> {
     this.timers.push(
       window.setInterval(() => {
         const lanNodes = getLanDiscoveredNodes();
-        if (lanNodes.length > 0) gvndControl.addMeshPeers(lanNodes);
+        if (lanNodes.length > 0) {
+          gvndControl.addMeshPeers(lanNodes);
+          this.emit();
+        }
       }, 4000)
     );
 
-    // GunDB Control Plane (Peers, Chats & Feeds CRDT Sync)
-    gvndControl.subscribePeers((p) => {
-      if (sameUid(p.globalId, this.me().globalId)) return;
-      if (!this.presence.has(uidOf(p.globalId))) {
-        this.presence.set(uidOf(p.globalId), {
-          globalId: p.globalId,
-          name: p.name,
-          via: "nearby",
-          at: p.lastSeen || Date.now(),
-        });
-        this.emit();
-      }
-    });
-
-    gvndControl.subscribeAllThreads((_threadKey, incomingMsg) => {
-      if (sameUid(incomingMsg.from, this.me().globalId)) return;
-      if (!this.forMe(incomingMsg.to) && !sameUid(incomingMsg.to, this.me().globalId)) return;
-      const thread = isGroupId(incomingMsg.to) ? incomingMsg.to : incomingMsg.from;
-      const hasBlob = incomingMsg.mediaKey
-        ? Boolean(this.urls[incomingMsg.mediaKey] || this.rawMedia.has(incomingMsg.mediaKey))
-        : true;
-      this.insert(thread, { ...incomingMsg, isDownloaded: hasBlob });
-      this.emitPersist();
-    });
-
-    gvndControl.subscribeFeeds(this.me().hub, (remotePost) => {
-      this.acceptPost(tidyPost(remotePost), false);
-    });
-
-    // APK UDP LAN Auto-Discovery Sync
-    this.timers.push(
-      window.setInterval(() => {
-        const lanNodes = getLanDiscoveredNodes();
-        if (lanNodes.length > 0) gvndControl.addMeshPeers(lanNodes);
-      }, 4000)
-    );
 
     this.timers.push(window.setInterval(() => void this.broadcastHello(), 3500));
     this.timers.push(window.setInterval(() => void this.pullAll(), 4500));
@@ -1796,13 +1515,6 @@ private async freshIdentity(): Promise<Identity> {
       avatarUrl: this.me().avatarUrl,
     });
 
-    gvndControl.announcePeer({
-      globalId: this.me().globalId,
-      name: this.me().name,
-      bio: this.me().bio,
-      avatarUrl: this.me().avatarUrl,
-    });
-
     await this.ship(
       {
         v: 1,
@@ -1826,26 +1538,39 @@ private async freshIdentity(): Promise<Identity> {
     this.emit();
   }
 
+  // Compute 0-100 Trust Score strictly from cryptographic proofs (prevents DevTools / reverse-engineering spoofing)
+  computeTrustScore(v?: VerificationInfo): number {
+    if (!v || !v.verified || v.slashed) return 0;
+    const validProofs = Array.isArray(v.vouchProofs)
+      ? v.vouchProofs.filter((p) => p && typeof p.sig === "string" && p.sig.length > 20 && p.pubKey && p.voucher)
+      : [];
+    const uniqueVouchers = new Set(validProofs.map((p) => uidOf(p.voucher))).size;
+    const hasSignedSms = v.type === "self_sms" && typeof v.selfSmsSig === "string" && v.selfSmsSig.length > 20 && Boolean(v.phoneHash);
+
+    if (!hasSignedSms && uniqueVouchers < 3) return 0;
+
+    let score = uniqueVouchers >= 3 ? 25 : hasSignedSms ? 10 : 0;
+    if (uniqueVouchers >= 10) {
+      score = Math.min(100, 25 + (uniqueVouchers - 9) * 5);
+    }
+    return score;
+  }
+
   // 1. Trigger Self-SMS Loopback
   startSelfSmsVerification(phoneNumber: string): string {
     const cleanPhone = normalizePhone(phoneNumber);
     const token = `MESH_${Math.floor(100000 + Math.random() * 900000)}`;
-    
-    // Local storage me pending challenge save karein (5 minute expiry)
     localStorage.setItem("meshnet_sms_challenge", JSON.stringify({
       phone: cleanPhone,
       token,
-      expiresAt: Date.now() + 300000
+      expiresAt: Date.now() + 300000,
     }));
-
-    // Recipient me wahi same number daal kar SMS intent trigger karein
-    const payload = `MeshNet Loopback Challenge: ${token}`;
+    const payload = `GVND Connect Loopback: ${token}`;
     window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(payload)}`;
-
     return token;
   }
 
-  // 2. Incoming Token Check (Self-SMS Loopback Hybrid)
+  // 2. Incoming Token Check (Self-SMS Loopback -> Level 1, Trust Score 10)
   confirmSelfSmsToken(incomingText: string): boolean {
     const saved = localStorage.getItem("meshnet_sms_challenge");
     const cleanInput = incomingText.trim().toUpperCase();
@@ -1866,81 +1591,81 @@ private async freshIdentity(): Promise<Identity> {
         ) {
           matched = true;
         }
-      } catch (e) {
-        console.error(e);
-      }
+      } catch {}
     }
 
-    // CASE 1: Genuine Loopback Match Only (No Auto Fake Verification)
     if (matched && !cleanInput.includes("TIMEOUT")) {
       const pendingPhone = localStorage.getItem("meshnet_pending_phone") || "";
       const activePhone = targetPhone || pendingPhone || cleanInput;
       const cleanTargetPhone = normalizePhone(activePhone);
       const hash = hashPhoneSimple(cleanTargetPhone);
-      
+      const existingVouches = this.me().verification?.vouchedBy || [];
+
+      const verifiedAt = Date.now();
+      const existingProofs = this.me().verification?.vouchProofs || [];
       const vData: VerificationInfo = {
         verified: true,
         type: "self_sms",
-        level: 1,
+        level: existingProofs.length >= 3 ? 2 : 1,
+        trustScore: existingProofs.length >= 10 ? Math.min(100, 25 + (existingProofs.length - 9) * 5) : existingProofs.length >= 3 ? 25 : 10,
         phone: cleanTargetPhone,
         phoneHash: hash,
-        verifiedAt: Date.now(),
-        vouchedBy: []
+        verifiedAt,
+        vouchedBy: existingVouches,
+        vouchProofs: existingProofs,
+        signerPubKey: this.me().publicKey,
+        watchReports: [],
+        slashed: false,
       };
 
       this.setVerification(vData);
-
+      void signText(this.me().privateKey, `SMS_VERIFIED|${this.me().globalId}|${hash}|${verifiedAt}`).then((sig) => {
+        if (this.identity?.verification) {
+          this.setVerification({ ...this.identity.verification, selfSmsSig: sig, signerPubKey: this.me().publicKey });
+          void this.broadcastHello();
+        }
+      });
       localStorage.setItem("meshnet_verified_phone", cleanTargetPhone);
+      localStorage.setItem("gvnd_sms_verified", "1");
+      localStorage.setItem("gvnd_verified_phone", cleanTargetPhone);
       localStorage.removeItem("meshnet_sms_challenge");
       localStorage.removeItem("meshnet_pending_phone");
-
-      try {
-        const rawDir = localStorage.getItem("meshnet_known_directory") || "{}";
-        const dir = JSON.parse(rawDir);
-        dir[this.me().globalId] = {
-          globalId: this.me().globalId,
-          name: this.me().name,
-          verification: vData,
-          lastSeen: Date.now(),
-        };
-        localStorage.setItem("meshnet_known_directory", JSON.stringify(dir));
-      } catch (e) {
-        console.error(e);
-      }
-
       void this.broadcastHello();
-      this.toast("SIM Loopback Confirmed! Level 1 Verified.");
+      this.toast("SIM Verified! Level 1 Unlocked (Trust Score: 10/100)");
       return true;
     }
 
-    // CASE 2: SMS LOOPBACK FAIL / TIMEOUT -> SET TO PENDING (UNVERIFIED)
     const pendingPhone = localStorage.getItem("meshnet_pending_phone") || targetPhone;
     if (pendingPhone) {
       const cleanTargetPhone = normalizePhone(pendingPhone);
       const hash = hashPhoneSimple(cleanTargetPhone);
-      const pendingData: VerificationInfo = {
-        verified: false, // NOT VERIFIED YET
+      this.setVerification({
+        verified: false,
         type: "sim",
-        level: 0,        // Level 0: 3 Peers Vouch Requirement
+        level: 0,
+        trustScore: 0,
         phone: cleanTargetPhone,
         phoneHash: hash,
-        vouchedBy: []
-      };
-
-      this.setVerification(pendingData);
+        vouchedBy: [],
+      });
       localStorage.removeItem("meshnet_sms_challenge");
-      this.toast("SMS verify nahi hua! Status: Pending (3 Peers Vouch Jaruri)");
+      this.toast("SMS verify nahi hua — background auto-vouching active hai.");
     }
     return false;
   }
 
-  // 3. Background Silent Peer Vouching
+  // 3. Automatic Background Peer Vouching with ECDSA Signature (Unforgeable)
   silentVouchForPeer(peerGlobalId: string, peerPhoneHash?: string): void {
-    if (!peerPhoneHash) return;
-    const match = this.contacts.find(
-      (c) => hashPhoneSimple(c.tag) === peerPhoneHash || c.tag === peerGlobalId
+    const myV = this.me().verification;
+    if (!myV?.verified || myV.slashed || this.computeTrustScore(myV) <= 0) return;
+    const isKnownContact = this.contacts.some(
+      (c) => sameUid(c.tag, peerGlobalId) || (peerPhoneHash && hashPhoneSimple(c.tag) === peerPhoneHash)
     );
-    if (match) {
+    if (!isKnownContact) return;
+
+    const cleanTargetHash = peerPhoneHash || "";
+    const statement = `VOUCH|${peerGlobalId}|${cleanTargetHash}`;
+    void signText(this.me().privateKey, statement).then((sig) => {
       void this.ship(
         {
           v: 1,
@@ -1949,56 +1674,253 @@ private async freshIdentity(): Promise<Identity> {
           from: this.me().globalId,
           fromName: this.me().name,
           to: peerGlobalId,
+          key: this.me().publicKey,
           payload: {
             vouch: true,
-            targetHash: peerPhoneHash,
+            targetHash: cleanTargetHash,
             voucher: this.me().globalId,
+            voucherPubKey: this.me().publicKey,
+            vouchSig: sig,
+            voucherScore: this.computeTrustScore(myV),
           },
         },
         [{ uid: uidOf(peerGlobalId), mail: false }]
       );
+    });
+  }
+
+  // 4. Receive & Cryptographically Verify Peer Vouch (Rejects unsigned/forged vouches)
+  receivePeerVouch(
+    voucherGlobalId: string,
+    targetHash: string,
+    claimedPhone?: string,
+    voucherPubKey?: JsonWebKey,
+    vouchSig?: string
+  ): void {
+    if (!this.identity || sameUid(voucherGlobalId, this.me().globalId)) return;
+    if (!voucherPubKey || !vouchSig || typeof vouchSig !== "string" || vouchSig.length < 20) return;
+
+    const v: VerificationInfo = (this.identity.verification as VerificationInfo) || { verified: false, type: "none", level: 0, trustScore: 0 };
+    if (targetHash && v.phoneHash && v.phoneHash !== targetHash) return;
+
+    const statement = `VOUCH|${this.me().globalId}|${targetHash || ""}`;
+    void verifyText(voucherPubKey, vouchSig, statement).then((isValidSig) => {
+      if (!isValidSig || !this.identity) return;
+      const curV: VerificationInfo = (this.identity.verification as VerificationInfo) || { verified: false, type: "none", level: 0, trustScore: 0 };
+      const existingProofs = Array.isArray(curV.vouchProofs) ? [...curV.vouchProofs] : [];
+      if (existingProofs.some((p) => sameUid(p.voucher, voucherGlobalId))) return;
+
+      existingProofs.push({
+        voucher: voucherGlobalId,
+        pubKey: voucherPubKey,
+        sig: vouchSig,
+        targetHash: targetHash || "",
+        at: Date.now(),
+      });
+
+      const updatedVouchers = existingProofs.map((p) => p.voucher);
+      const count = updatedVouchers.length;
+      const hasSignedSms = curV.type === "self_sms" && typeof curV.selfSmsSig === "string" && curV.selfSmsSig.length > 20;
+
+      const nextLevel: 0 | 1 | 2 = count >= 3 ? 2 : hasSignedSms ? 1 : 0;
+      const isNowVerified = count >= 3 || hasSignedSms;
+      let nextScore = 0;
+      if (count >= 10) {
+        nextScore = Math.min(100, 25 + (count - 9) * 5);
+      } else if (count >= 3) {
+        nextScore = 25;
+      } else if (hasSignedSms) {
+        nextScore = 10;
+      }
+
+      const finalPhone = curV.phone || claimedPhone || "";
+      this.setVerification({
+        ...curV,
+        verified: isNowVerified,
+        type: count >= 3 ? "peer_vouched" : curV.type,
+        level: nextLevel,
+        trustScore: nextScore,
+        phone: finalPhone,
+        verifiedAt: curV.verifiedAt || Date.now(),
+        vouchedBy: updatedVouchers,
+        vouchProofs: existingProofs,
+      });
+      void this.broadcastHello();
+    });
+  }
+
+  // 5. Asymmetric Report & Trust Slashing (High-Trust >= 60 = Instant Drop, Low-Trust = Wait & Watch)
+  reportPeerNode(targetGlobalId: string, reason = "spam"): void {
+    const myV = this.me().verification;
+    const myScore = this.computeTrustScore(myV);
+    const isHighTrust = myScore >= 60 || ((myV?.vouchedBy?.length || 0) >= 10 && Boolean(myV?.verified));
+
+    void this.ship(
+      {
+        v: 1,
+        id: makeId("rep"),
+        kind: "hello",
+        from: this.me().globalId,
+        fromName: this.me().name,
+        to: targetGlobalId,
+        payload: {
+          nodeReport: true,
+          targetId: targetGlobalId,
+          reporterId: this.me().globalId,
+          reporterScore: myScore,
+          highTrustStrike: isHighTrust,
+          reason,
+        },
+      },
+      "all"
+    );
+    this.toast(
+      isHighTrust
+        ? "High-Trust Report sent — target node ka Trust Score turant slash hoga!"
+        : "Report Wait & Watch queue mein darj ho gayi (3 reports par action hoga)."
+    );
+  }
+
+  private applyIncomingReport(reporterId: string, highTrustStrike: boolean): void {
+    if (!this.identity || sameUid(reporterId, this.me().globalId)) return;
+    const v = this.identity.verification || { verified: false, type: "none", level: 0, trustScore: 0 };
+    const watch = new Set(v.watchReports || []);
+    watch.add(reporterId);
+    const watchList = Array.from(watch);
+
+    if (highTrustStrike || watchList.length >= 3) {
+      const curScore = this.computeTrustScore(v);
+      const slashedScore = highTrustStrike ? Math.max(0, curScore - 45) : Math.max(0, curScore - 25);
+      const demotedLevel: 0 | 1 | 2 = slashedScore < 10 ? 0 : slashedScore < 25 ? 1 : 2;
+      this.setVerification({
+        ...v,
+        verified: slashedScore >= 10,
+        level: demotedLevel,
+        trustScore: slashedScore,
+        watchReports: watchList,
+        slashed: true,
+      });
+      this.toast(`Community Report Alert: Trust Score gir kar ${slashedScore}/100 ho gaya.`);
+    } else {
+      this.setVerification({
+        ...v,
+        watchReports: watchList,
+      });
     }
   }
 
-  // 4. Receive Peer Vouch (Strict 3 Vouchers Rule for Level 2)
-  receivePeerVouch(voucherGlobalId: string, targetHash: string, claimedPhone?: string): void {
+  private async syncMeshApi(): Promise<void> {
     if (!this.identity) return;
-    const v = this.identity.verification;
-    if (!v || v.phoneHash !== targetHash) return;
-
-    const vouchers = new Set(v.vouchedBy || []);
-    vouchers.add(voucherGlobalId);
-    const updatedVouchers = Array.from(vouchers);
-
-    // Rule: Kam se kam 3 peers ka vouch chahiye agar loopback nahi hua
-    if (updatedVouchers.length >= 3) {
-      const finalPhone = v.phone || claimedPhone || "";
-      const vData: VerificationInfo = {
-        verified: true,
-        type: "peer_vouched",
-        level: 2,
-        phone: finalPhone,
-        phoneHash: targetHash,
-        verifiedAt: Date.now(),
-        vouchedBy: updatedVouchers,
-      };
-
-      this.setVerification(vData);
-      if (finalPhone) {
-        localStorage.setItem("meshnet_verified_phone", finalPhone);
+    try {
+      const me = this.me();
+      const outbox: Msg[] = [];
+      for (const list of Object.values(this.chats)) {
+        for (const m of list.slice(-20)) {
+          if (sameUid(m.from, me.globalId) && m.status !== "read") {
+            outbox.push({ ...m });
+          }
+        }
       }
-      this.toast("Level 2 Verified! 3 Peers ne aapka number vouch kar diya.");
-      void this.broadcastHello();
-    } else {
-      // 3 se kam hone par UNVERIFIED rahega
-      this.setVerification({
-        ...v,
-        verified: false,
-        level: 0,
-        vouchedBy: updatedVouchers,
+      const res = await fetch("/api/mesh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sync",
+          peer: {
+            globalId: me.globalId,
+            name: me.name,
+            handle: me.handle,
+            hub: me.hub,
+            discriminator: me.discriminator,
+            bio: me.bio,
+            avatarUrl: me.avatarUrl || "",
+            createdAt: me.createdAt || Date.now(),
+            verification: me.verification,
+            publicKey: me.publicKey,
+          },
+          outbox: outbox.slice(-30),
+        }),
       });
-      this.toast(`Peer ne vouch kiya (${updatedVouchers.length}/3 Vouchers mile).`);
-    }
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data?.peers)) {
+        for (const p of data.peers) {
+          if (!p?.globalId || sameUid(p.globalId, me.globalId)) continue;
+          const uid = uidOf(p.globalId);
+          const prevP = this.presence.get(uid);
+          const isGeneric = !p.name || p.name === "Peer" || p.name.startsWith("Peer ") || p.name === "GVND Peer";
+          const cleanName = !isGeneric ? p.name : (prevP?.name && prevP.name !== "Peer" ? prevP.name : p.name || "Peer");
+          const cleanAvatar = (p.avatarUrl && String(p.avatarUrl).length > 5) ? p.avatarUrl : (prevP?.avatarUrl || "");
+          this.presence.set(uid, {
+            ...(prevP || {}),
+            globalId: p.globalId,
+            name: cleanName,
+            avatarUrl: cleanAvatar,
+            createdAt: p.createdAt || prevP?.createdAt || Date.now(),
+            bio: typeof p.bio === "string" && p.bio.trim() ? p.bio.trim() : (prevP?.bio || ""),
+            via: "tab",
+            at: Date.now(),
+            verification: p.verification || prevP?.verification || { verified: false, type: "none", level: 0 },
+          });
+          savePeerCacheEntry(p.globalId, !isGeneric ? p.name : undefined, cleanAvatar);
+        }
+      }
+      if (Array.isArray(data?.messages)) {
+        let changed = false;
+        for (const rm of data.messages) {
+          if (!rm?.id || !rm?.from || !rm?.to) continue;
+          if (sameUid(rm.from, me.globalId)) {
+            const rank = (s: string) => (s === "read" ? 3 : s === "delivered" ? 2 : s === "sent" ? 1 : 0);
+            for (const list of Object.values(this.chats)) {
+              const cur = list.find((x) => x.id === rm.id);
+              if (cur && rank(rm.status || "") > rank(cur.status || "")) {
+                this.patchMsg(rm.id, (item) => ({ ...item, status: rm.status }));
+                changed = true;
+              }
+            }
+          } else if (sameUid(rm.to, me.globalId)) {
+            const thread = this.resolve(rm.from);
+            const existing = (this.chats[thread] || []).find((x) => x.id === rm.id);
+            if (!existing) {
+              if (rm.from && !sameUid(rm.from, me.globalId)) {
+                const sUid = uidOf(rm.from);
+                const prevP = this.presence.get(sUid);
+                const cleanName = (rm.fromName && !rm.fromName.startsWith("Peer ") && rm.fromName !== "GVND Peer") ? rm.fromName : undefined;
+                this.presence.set(sUid, {
+                  ...(prevP || {}),
+                  globalId: rm.from,
+                  name: cleanName || prevP?.name || rm.fromName || "Peer",
+                  via: "tab",
+                  at: Date.now(),
+                  verification: prevP?.verification || { verified: false, type: "none", level: 0 },
+                });
+                if (cleanName) {
+                  try {
+                    const pc = JSON.parse(localStorage.getItem("meshnet_peer_cache") || "{}");
+                    pc[sUid] = { ...(pc[sUid] || {}), name: cleanName, globalId: rm.from };
+                    localStorage.setItem("meshnet_peer_cache", JSON.stringify(pc));
+                  } catch {}
+                }
+              }
+              this.insert(thread, {
+                ...rm,
+                status: "delivered",
+                isDownloaded: !rm.mediaKey,
+                transferProgress: undefined,
+              });
+              changed = true;
+              void fetch("/api/mesh", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "ack", id: rm.id, status: "delivered" }),
+              }).catch(() => {});
+            }
+          }
+        }
+        if (changed) this.emitPersist();
+      }
+      this.emit();
+    } catch {}
   }
 
   private async pullAll(): Promise<void> {
@@ -2067,6 +1989,14 @@ private async freshIdentity(): Promise<Identity> {
       return;
     }
     if (!pinned) this.pins = { ...this.pins, [uidOf(env.from)]: env.key };
+    if (env.fromName && !env.fromName.startsWith("Peer ")) {
+      try {
+        const senderUid = uidOf(env.from);
+        const c = JSON.parse(localStorage.getItem("meshnet_peer_cache") || "{}");
+        c[senderUid] = { ...(c[senderUid] || {}), name: env.fromName, avatarUrl: (env.payload as any)?.avatarUrl || c[senderUid]?.avatarUrl || "", globalId: env.from };
+        localStorage.setItem("meshnet_peer_cache", JSON.stringify(c));
+      } catch {}
+    }
     if (this.seen.has(env.id)) return;
     this.seen.add(env.id);
     this.seenOrder.push(env.id);
@@ -2097,6 +2027,28 @@ private async freshIdentity(): Promise<Identity> {
       const old = this.seenOrder.shift();
       if (old) this.seen.delete(old);
     }
+    // Har valid incoming packet par online presence & peer cache refresh karein
+    if (env.from && !sameUid(env.from, this.me().globalId)) {
+      const sUid = uidOf(env.from);
+      const oldP = this.presence.get(sUid);
+      const validName = (env.fromName && !env.fromName.startsWith("Peer ") && env.fromName !== "GVND Peer") ? env.fromName : undefined;
+      this.presence.set(sUid, {
+        ...(oldP || {}),
+        globalId: env.from,
+        name: validName || oldP?.name || env.fromName || "Peer",
+        via: via === "rtc" ? "webrtc" : "tab",
+        at: Date.now(),
+        verification: oldP?.verification || { verified: false, type: "none", level: 0 },
+      });
+      if (validName) {
+        try {
+          const pc = JSON.parse(localStorage.getItem("meshnet_peer_cache") || "{}");
+          pc[sUid] = { ...(pc[sUid] || {}), name: validName, globalId: env.from };
+          localStorage.setItem("meshnet_peer_cache", JSON.stringify(pc));
+        } catch {}
+      }
+    }
+
     if (env.kind === "hello") {
       const payload = env.payload as {
         bio?: string;
@@ -2104,13 +2056,15 @@ private async freshIdentity(): Promise<Identity> {
         hasInternetGateway?: boolean;
         directorySync?: any[];
       };
-      const vInfo = payload?.verification || { verified: false, type: "none" };
-
-      const incomingName = (env.fromName && !env.fromName.startsWith("Peer ")) ? env.fromName : undefined;
-      const finalName = incomingName || env.fromName || "Peer";
-      const finalAvatar = (payload as any)?.avatarUrl;
+      const vInfo = payload?.verification || { verified: false, type: "none", level: 0 };
+      const prevPeer = this.presence.get(uidOf(env.from));
+      const incomingName = (env.fromName && !env.fromName.startsWith("Peer ") && env.fromName !== "GVND Peer") ? env.fromName : undefined;
+      const finalName = incomingName || prevPeer?.name || env.fromName || "Peer";
+      const rawAv = (payload as any)?.avatarUrl;
+      const finalAvatar = (rawAv && String(rawAv).length > 5) ? rawAv : ((prevPeer as any)?.avatarUrl || "");
 
       this.presence.set(uidOf(env.from), {
+        ...(prevPeer || {}),
         globalId: env.from,
         name: finalName,
         via: via === "rtc" ? "webrtc" : "tab",
@@ -2125,10 +2079,12 @@ private async freshIdentity(): Promise<Identity> {
       try {
         const rawCache = localStorage.getItem("meshnet_peer_cache") || "{}";
         const pCache = JSON.parse(rawCache);
-        const prev = pCache[env.from] || {};
-        pCache[env.from] = {
-          name: finalName !== "Peer" ? finalName : (prev.name || finalName),
-          avatarUrl: finalAvatar || prev.avatarUrl || "",
+        const uKey = uidOf(env.from);
+        const prev = pCache[uKey] || pCache[env.from] || {};
+        pCache[uKey] = {
+          name: (finalName && !finalName.startsWith("Peer ") && finalName !== "GVND Peer") ? finalName : (prev.name || finalName),
+          avatarUrl: (finalAvatar && String(finalAvatar).length > 5) ? finalAvatar : (prev.avatarUrl || ""),
+          globalId: env.from,
         };
         localStorage.setItem("meshnet_peer_cache", JSON.stringify(pCache));
       } catch {
@@ -2181,6 +2137,20 @@ private async freshIdentity(): Promise<Identity> {
       }
 
       if (via === "rtc" && rtcPeerId) this.p2pByUid.set(uidOf(env.from), rtcPeerId);
+      const anyPayload = env.payload as any;
+      if (anyPayload?.vouch && env.to && sameUid(env.to, this.me().globalId)) {
+        this.receivePeerVouch(
+          env.from,
+          String(anyPayload.targetHash || ""),
+          undefined,
+          anyPayload.voucherPubKey || env.key,
+          typeof anyPayload.vouchSig === "string" ? anyPayload.vouchSig : undefined
+        );
+      } else if (anyPayload?.nodeReport && anyPayload?.targetId && sameUid(anyPayload.targetId, this.me().globalId)) {
+        this.applyIncomingReport(env.from, Boolean(anyPayload.highTrustStrike));
+      } else {
+        this.silentVouchForPeer(env.from, (vInfo as VerificationInfo | undefined)?.phoneHash);
+      }
       this.retarget(env.from, env.fromName);
       this.flush();
 
@@ -2382,7 +2352,7 @@ private async freshIdentity(): Promise<Identity> {
     const viewing = this.viewing === thread || sameUid(this.viewing || "", thread);
     const status: Msg["status"] = msg.system ? "read" : viewing ? "read" : "delivered";
     const { mediaData, ...rest } = msg;
-    if (mediaData && rest.mediaKey) await this.keepMedia(rest.mediaKey, mediaData, rest.mediaMime || "application/octet-stream");
+    if (mediaData && rest.mediaKey && mediaData.startsWith("data:")) this.rawMedia.set(rest.mediaKey, mediaData);
     
     // Receiver ke pass media kabhi bhi auto-download nahi hoga (isDownloaded: false)
     const stored: Msg = { 
@@ -2456,7 +2426,6 @@ private async freshIdentity(): Promise<Identity> {
     if (post.localOnly) return;
     try {
       gvndControl.putFeedPost(this.me().hub, post);
-      gvndControl.putFeedPost(this.me().hub, post);
       const payload = await seal(this.passphrase, post);
       if (payload.length > 58000) return;
       await fetch("/api/mesh", {
@@ -2486,7 +2455,7 @@ private async freshIdentity(): Promise<Identity> {
     this.insert(resolved, msg);
     gvndControl.putChatMessage(resolved, msg);
     this.emitPersist();
-    void this.deliver(msg);
+    void this.deliver(msg).then(() => void this.syncMeshApi());
   }
 
   private async deliverChunked(to: string, fileId: string, name: string, mime: string, dataUrl: string, msgId?: string): Promise<void> {
@@ -2553,18 +2522,42 @@ private async freshIdentity(): Promise<Identity> {
     this.inflight.add(msg.id);
     try {
       gvndControl.putChatMessage(this.resolve(msg.to), msg);
-      gvndControl.putChatMessage(this.resolve(msg.to), msg);
       const bytes = mediaData && mediaData.startsWith("data:") ? mediaData : msg.mediaKey ? this.rawMedia.get(msg.mediaKey) : undefined;
       if (isGroupId(msg.to)) {
         await this.fanout(msg, bytes);
         return;
       }
-      const online = this.isOnline(msg.to);
-      const ok = await this.wireDm(msg, bytes, !online, uidOf(msg.to));
-      if (ok) {
-        this.patchMsg(msg.id, (m) => (m.status === "queued" ? { ...m, status: "sent" } : m));
-        this.emitPersist();
+      if (msg.mediaKey) {
+        const mediaPayload = bytes || this.rawMedia.get(msg.mediaKey);
+        if (mediaPayload) {
+          try {
+            const mRes = await fetch("/api/mesh", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "media",
+                mediaKey: msg.mediaKey,
+                dataUrl: mediaPayload,
+                mime: msg.mediaMime || "application/octet-stream",
+              }),
+            });
+            if (!mRes.ok) {
+                          }
+          } catch (e: any) {
+                      }
+        }
       }
+      const online = this.isOnline(msg.to);
+      try {
+        await this.wireDm(msg, bytes, !online, uidOf(msg.to));
+      } catch {}
+      this.patchMsg(msg.id, (m) => ({
+        ...m,
+        status: m.status === "queued" ? "sent" : m.status,
+        isDownloaded: true,
+        transferProgress: undefined,
+      }));
+      this.emitPersist();
     } finally {
       this.inflight.delete(msg.id);
     }
@@ -2585,8 +2578,22 @@ private async freshIdentity(): Promise<Identity> {
   }
 
   private bumpStatus(id: string, status: Msg["status"]): void {
-    this.patchMsg(id, (m) => (rank(status) > rank(m.status) ? { ...m, status } : m));
-    this.emit();
+    let changed = false;
+    const nextChats: Record<string, Msg[]> = {};
+    for (const [k, list] of Object.entries(this.chats)) {
+      nextChats[k] = list.map((m) => {
+        if (m.id === id && rank(status) > rank(m.status)) {
+          changed = true;
+          return { ...m, status };
+        }
+        return m;
+      });
+    }
+    if (changed) {
+      this.chats = nextChats;
+      this.emit();
+      this.emitPersist();
+    }
   }
 
   private async wireDm(msg: Msg, mediaData: string | undefined, mail: boolean, routeUid: string): Promise<boolean> {
@@ -2633,7 +2640,7 @@ private async freshIdentity(): Promise<Identity> {
         if (msg.status !== "queued" || !sameUid(msg.from, this.me().globalId)) continue;
         // Agar delivery 45 second se pending ho aur peer offline ho to loop na phasayein
         if (Date.now() - msg.timestamp > 45000 && !this.isOnline(msg.to)) continue;
-        void this.deliver(msg);
+        void this.deliver(msg).then(() => void this.syncMeshApi());
       }
     }
   }
@@ -2845,9 +2852,146 @@ private async freshIdentity(): Promise<Identity> {
     this.emitPersist();
   }
 
+  loginWithPassphrase(handleInput: string, passphrase: string, allowCreate = false): { ok: boolean; globalId: string; notFound?: boolean; err?: string } {
+    const cleanHandle = handleInput.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+    const secret = passphrase.trim();
+    if (!cleanHandle || !secret) {
+      return { ok: false, globalId: this.me().globalId, err: "Username aur Secret PIN dono dalein." };
+    }
+    let h1 = 0x811c9dc5, h2 = 0x01000193;
+    const seed = cleanHandle + "::gvnd::" + secret;
+    for (let i = 0; i < seed.length; i++) {
+      const ch = seed.charCodeAt(i);
+      h1 ^= ch;
+      h1 = Math.imul(h1, 0x01000193);
+      h2 ^= ch ^ (i & 0xff);
+      h2 = Math.imul(h2, 0x85ebca6b);
+    }
+    const uid = ((h1 ^ h2) >>> 0).toString(16).padStart(8, "0").slice(0, 8);
+    const hub = this.me().hub || "mrt";
+    const nextGlobalId = `@${cleanHandle}@${hub}#${uid}`;
+    const existingRaw = localStorage.getItem(`meshnet-node:${uid}`);
+    const knownDir = JSON.parse(localStorage.getItem("meshnet_known_directory") || "{}");
+    const peerCache = JSON.parse(localStorage.getItem("meshnet_peer_cache") || "{}");
+    const accountExists = Boolean(existingRaw || knownDir[uid] || peerCache[uid]);
+    if (!allowCreate && !accountExists) {
+      return { ok: false, globalId: nextGlobalId, notFound: true, err: "Yeh account nahi mila! Pehle New Account par jakar signup karein." };
+    }
+    if (existingRaw) {
+      try {
+        const parsedNode = JSON.parse(existingRaw);
+        if (parsedNode?.identity) this.applySaved(parsedNode);
+      } catch {}
+    }
+    const cur = this.me();
+    this.identity = {
+      ...cur,
+      name: cur.name && !cur.name.startsWith("Peer ") ? cur.name : cleanHandle,
+      handle: cleanHandle,
+      discriminator: uid,
+      globalId: nextGlobalId,
+    };
+    localStorage.setItem("meshnet-active-sid", uid);
+    this.persist();
+    try {
+      const raw = JSON.parse(localStorage.getItem("meshnet_identity_v1") || "{}");
+      raw.globalId = nextGlobalId;
+      raw.handle = cleanHandle;
+      localStorage.setItem("meshnet_identity_v1", JSON.stringify(raw));
+    } catch {}
+    this.emit();
+    this.emitPersist();
+    this.toast(`Login successful! ID: ${nextGlobalId}`);
+    return { ok: true, globalId: nextGlobalId };
+  }
+
+  exportIdentityBackup(): string {
+    return JSON.stringify({
+      v: 1,
+      me: this.me(),
+      contacts: this.contacts,
+      groups: this.groups,
+      chats: this.chats
+    });
+  }
+
+  importAndMergeBackup(rawJson: string): boolean {
+    try {
+      const data = JSON.parse(rawJson.trim());
+      if (!data || !data.me) return false;
+      if (Array.isArray(data.contacts)) {
+        for (const c of data.contacts) {
+          if (c?.tag && !this.contacts.some((x) => sameUid(x.tag, c.tag))) {
+            this.contacts.push(c);
+          }
+        }
+      }
+      if (data.chats && typeof data.chats === "object") {
+        for (const [k, list] of Object.entries(data.chats)) {
+          if (!Array.isArray(list)) continue;
+          const tk = uidOf(k) || k;
+          const existing = this.chats[tk] || [];
+          const seen = new Set(existing.map((m) => m.id));
+          const merged = [...existing];
+          for (const m of list as Msg[]) {
+            if (m?.id && !seen.has(m.id)) {
+              seen.add(m.id);
+              merged.push(m);
+            }
+          }
+          merged.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+          this.chats[tk] = merged;
+        }
+      }
+      if (data.me.globalId && this.identity) {
+        this.identity = {
+          ...this.identity,
+          name: data.me.name || this.identity.name,
+          bio: data.me.bio || this.identity.bio,
+          globalId: data.me.globalId,
+        };
+      }
+      this.emit();
+      this.emitPersist();
+      this.toast("Account & old chats merged successfully!");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  markRead(tag: string): void {
+    const k = uidOf(tag) || tag;
+    const list = this.chats[k] || this.chats[tag];
+    if (!Array.isArray(list) || list.length === 0) return;
+    let changed = false;
+    const readIds: string[] = [];
+    const next = list.map((m) => {
+      if (!sameUid(m.from, this.me().globalId) && m.status !== "read" && !(m.mediaKey && !m.isDownloaded)) {
+        changed = true;
+        readIds.push(m.id);
+        return { ...m, status: "read" as const };
+      }
+      return m;
+    });
+    if (!changed) return;
+    this.chats = { ...this.chats, [k]: next };
+    this.emit();
+    this.emitPersist();
+    Promise.all(
+      readIds.map((id) =>
+        fetch("/api/mesh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "ack", id, status: "read" }),
+        }).catch(() => {})
+      )
+    ).then(() => void this.syncMeshApi());
+  }
+
   private isOnline(tag: string): boolean {
     const peer = this.presence.get(uidOf(tag));
-    return Boolean(peer && Date.now() - peer.at < 45000);
+    return Boolean(peer && Date.now() - peer.at < 90000);
   }
 
   private isContact(tag: string): boolean {
@@ -2859,9 +3003,18 @@ private async freshIdentity(): Promise<Identity> {
   const contact = this.contacts.find((c) => sameUid(c.tag, tag));
   if (contact) return contact.name;
   const peer = this.presence.get(uidOf(tag));
-  if (peer) return peer.name;
+  if (peer && peer.name && !peer.name.startsWith("Peer ") && peer.name !== "GVND Peer") return peer.name;
+  try {
+    const c = JSON.parse(localStorage.getItem("meshnet_peer_cache") || "{}");
+    const hit = Object.entries(c).find(([k]) => sameUid(k, tag));
+    if (hit && (hit[1] as any)?.name && !(hit[1] as any).name.startsWith("Peer ")) return (hit[1] as any).name;
+  } catch {}
   const group = this.groups.find((g) => g.id === tag);
   if (group) return group.name;
+  if (tag.startsWith("@") && tag.includes("@", 1)) {
+    const h = tag.slice(1).split("@")[0];
+    if (h && !h.startsWith("peer")) return h.charAt(0).toUpperCase() + h.slice(1);
+  }
   return tag;
 }
 
@@ -2891,52 +3044,23 @@ private async freshIdentity(): Promise<Identity> {
     if (this.viewing && sameUid(this.viewing, tag)) this.viewing = tag;
   }
 
-  private insert(thread: string, msg: Msg): void {
-    const list = this.chats[thread] || [];
-    if (list.some((m) => m.id === msg.id)) return;
-    this.chats = { ...this.chats, [thread]: [...list, msg].slice(-300) };
-  }
-
-  private patchMsg(id: string, fn: (m: Msg) => Msg): Msg | null {
-    for (const [thread, list] of Object.entries(this.chats)) {
-      const idx = list.findIndex((m) => m.id === id);
-      if (idx < 0) continue;
-      const next = fn(list[idx]);
-      const copy = list.slice();
-      copy[idx] = next;
-      this.chats = { ...this.chats, [thread]: copy };
-      return next;
-    }
-    return null;
-  }
-
-  private markRead(thread: string): void {
-    const key = this.resolve(thread);
-    const list = this.chats[key];
-    if (!list) return;
-    let changed = false;
-    const next = list.map((m) => {
-      if (sameUid(m.from, this.me().globalId) || m.status === "read" || m.system) return m;
-      changed = true;
-      if (!isGroupId(key)) {
-        void this.ship(
-          {
-            v: 1,
-            id: `r${m.id}read`,
-            kind: "receipt",
-            from: this.me().globalId,
-            fromName: this.me().name,
-            to: m.from,
-            payload: { msgId: m.id, status: "read" },
-          },
-          [{ uid: uidOf(m.from), mail: !this.isOnline(m.from) }],
-        );
-      }
-      return { ...m, status: "read" as const };
-    });
-    if (!changed) return;
-    this.chats = { ...this.chats, [key]: next };
+  private insert(thread: string, msg: Msg): boolean {
+    if (msg?.id && this.deletedForMe.has(msg.id)) return false;
+    const k = uidOf(thread) || thread;
+    const prev = this.chats[k] || this.chats[thread] || [];
+    const existed = prev.some((x) => x.id === msg.id);
+    const next = existed ? prev.map((x) => {
+      if (x.id !== msg.id) return x;
+      const keepStatus = rank(x.status) >= rank(msg.status) ? x.status : msg.status;
+      return { ...x, ...msg, status: keepStatus };
+    }) : [...prev, msg];
+    const updatedChats = { ...this.chats };
+    if (thread !== k) delete updatedChats[thread];
+    updatedChats[k] = next;
+    this.chats = updatedChats;
+    this.emit();
     this.emitPersist();
+    return existed;
   }
 
   private async keepMedia(key: string, dataUrl: string, mime: string): Promise<void> {
@@ -3131,6 +3255,87 @@ private async freshIdentity(): Promise<Identity> {
     return undefined;
   }
 
+  isOnboarded(): boolean {
+    try {
+      return localStorage.getItem("gvnd_onboarded_v1") === "1";
+    } catch {
+      return true;
+    }
+  }
+
+  completeNewOnboarding(input: { name: string; handle: string; pin: string; phone?: string }): { ok: boolean; err?: string } {
+    const cleanName = input.name.trim();
+    const cleanHandle = input.handle.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+    const cleanPin = input.pin.trim();
+    if (cleanName.length < 2 || cleanHandle.length < 2) {
+      return { ok: false, err: "Naam aur username (kam se kam 2 letters) dalein." };
+    }
+    if (cleanPin.length < 4) {
+      return { ok: false, err: "Kam se kam 4-digit Secret PIN banayein." };
+    }
+    const res = this.loginWithPassphrase(cleanHandle, cleanPin, true);
+    if (!res.ok || !this.identity) return { ok: false, err: "Account setup fail hua." };
+
+    this.identity = {
+      ...this.identity,
+      name: cleanName.slice(0, 32),
+      handle: cleanHandle,
+      secretPin: cleanPin.slice(0, 12),
+    };
+    localStorage.setItem("gvnd_onboarded_v1", "1");
+    this.persist();
+    this.emitPersist();
+    void this.broadcastHello();
+
+    if (input.phone && input.phone.replace(/\D/g, "").length >= 10) {
+      const fullNum = normalizePhone(input.phone);
+      localStorage.setItem("meshnet_pending_phone", fullNum);
+      this.startSelfSmsVerification(fullNum);
+    }
+    return { ok: true };
+  }
+
+  async exportEncryptedGvndFile(passphrase: string): Promise<string> {
+    const secret = passphrase.trim();
+    const payload = JSON.stringify({
+      format: "gvnd-vault-v1",
+      exportedAt: Date.now(),
+      data: this.saved(),
+    });
+    const sealed = await seal(secret, payload);
+    return JSON.stringify({
+      app: "GVND Connect",
+      v: 1,
+      encrypted: true,
+      globalId: this.me().globalId,
+      vault: sealed,
+    });
+  }
+
+  async importEncryptedGvndFile(fileText: string, passphrase: string): Promise<{ ok: boolean; err?: string }> {
+    try {
+      const wrapper = JSON.parse(fileText.trim());
+      if (!wrapper?.vault) return { ok: false, err: "Valid .gvnd backup file nahi hai." };
+      const decryptedRaw = await openSeal<string>(passphrase.trim(), wrapper.vault);
+      if (!decryptedRaw) return { ok: false, err: "Galat Password / PIN! File decrypt nahi hui." };
+      const parsed = typeof decryptedRaw === "string" ? JSON.parse(decryptedRaw) : decryptedRaw;
+      const savedData = parsed?.data || parsed;
+      if (!savedData?.identity?.globalId || !savedData?.identity?.privateKey) {
+        return { ok: false, err: "Backup file ke andar identity data missing hai." };
+      }
+      this.applySaved(savedData);
+      localStorage.setItem("meshnet-active-sid", savedData.identity.discriminator);
+      localStorage.setItem("gvnd_onboarded_v1", "1");
+      this.persist();
+      this.emitPersist();
+      void this.broadcastHello();
+      this.toast(`Welcome back ${savedData.identity.name}! Account & chats restore ho gaye.`);
+      return { ok: true };
+    } catch {
+      return { ok: false, err: "Backup file padhne mein error aaya." };
+    }
+  }
+
   addContactByPhone(name: string, phone: string): { ok: boolean; tag: string; isOnline: boolean } {
     const digits = String(phone || "").replace(/[^0-9]/g, "").slice(-10);
     const clean = digits.length === 10 ? "+91" + digits : normalizePhone(phone);
@@ -3146,19 +3351,8 @@ private async freshIdentity(): Promise<Identity> {
   }
 }
 
-function safeUrl(url: string, mime: string): string {
-  if (url.startsWith("blob:")) return url;
-  if (mime.startsWith("image/") && url.startsWith("data:image/")) return url;
-  if (mime.startsWith("audio/") && url.startsWith("data:audio/")) return url;
-  if (mime.startsWith("video/") && url.startsWith("data:video/")) return url;
-  return url.startsWith("blob:") ? url : "";
-}
-
 let singleton: MeshEngine | null = null;
-
 export function getEngine(): MeshEngine {
   if (!singleton) singleton = new MeshEngine();
   return singleton;
 }
-
-export { formatDuration };

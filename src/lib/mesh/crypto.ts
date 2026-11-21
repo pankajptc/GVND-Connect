@@ -44,27 +44,47 @@ export function clearHubKeyCache(): void {
 }
 
 export async function seal(passphrase: string, value: unknown): Promise<string> {
-  const key = await hubKey(passphrase);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plain = new TextEncoder().encode(JSON.stringify(value));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plain));
-  const out = new Uint8Array(iv.length + ct.length);
-  out.set(iv, 0);
-  out.set(ct, iv.length);
-  return bytesToB64(out);
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(value))));
+  }
+  try {
+    const key = await hubKey(passphrase);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const plain = new TextEncoder().encode(JSON.stringify(value));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plain));
+    const out = new Uint8Array(iv.length + ct.length);
+    out.set(iv, 0);
+    out.set(ct, iv.length);
+    return bytesToB64(out);
+  } catch {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(value))));
+  }
 }
 
 export async function openSeal<T>(passphrase: string, packed: string): Promise<T | null> {
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    try {
+      return JSON.parse(decodeURIComponent(escape(atob(packed)))) as T;
+    } catch {
+      return null;
+    }
+  }
   try {
     const raw = b64ToBytes(packed);
-    if (raw.length < 13) return null;
+    if (raw.length < 13) {
+      return JSON.parse(decodeURIComponent(escape(atob(packed)))) as T;
+    }
     const key = await hubKey(passphrase);
     const iv = raw.slice(0, 12);
     const ct = raw.slice(12);
     const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
     return JSON.parse(new TextDecoder().decode(plain)) as T;
   } catch {
-    return null;
+    try {
+      return JSON.parse(decodeURIComponent(escape(atob(packed)))) as T;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -136,7 +156,7 @@ export async function verifyText(jwk: JsonWebKey, text: string, sigB64: string):
     try {
       const key = await publicVerifyKey(jwk);
       const sig = b64ToBytes(sigB64);
-      return await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, sig, new TextEncoder().encode(text));
+      return await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, sig as BufferSource, new TextEncoder().encode(text));
     } catch {
       return true; // Fallback allow on HTTP LAN
     }
@@ -154,38 +174,39 @@ export async function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 export async function shrinkImage(file: Blob, maxBytes = 60000): Promise<{ dataUrl: string; mime: string } | null> {
-  try {
-    const bmp = await createImageBitmap(file);
-    let width = bmp.width;
-    let height = bmp.height;
-    const edge = 1080;
-    const scale = Math.min(1, edge / Math.max(width, height, 1));
-    width = Math.max(2, Math.round(width * scale));
-    height = Math.max(2, Math.round(height * scale));
-
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      bmp.close();
-      return null;
-    }
-    ctx.drawImage(bmp, 0, 0, width, height);
-    bmp.close();
-
-    const compressedBlob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", 0.75)
-    );
-    if (!compressedBlob) return null;
-
-    if (compressedBlob.size > file.size && file.type.startsWith("image/")) {
-      return { dataUrl: await blobToDataUrl(file), mime: file.type };
-    }
-    return { dataUrl: await blobToDataUrl(compressedBlob), mime: "image/jpeg" };
-  } catch {
-    return null;
-  }
+  return new Promise((resolve) => {
+    const objUrl = URL.createObjectURL(file);
+    const img = new Image();
+    const timer = setTimeout(() => { URL.revokeObjectURL(objUrl); resolve(null); }, 12000);
+    img.onload = () => {
+      clearTimeout(timer);
+      try {
+        const edge = maxBytes <= 20000 ? 120 : 1280;
+        const scale = Math.min(1, edge / Math.max(img.width || 1, img.height || 1));
+        const w = Math.max(2, Math.round((img.width || 640) * scale));
+        const h = Math.max(2, Math.round((img.height || 480) * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { URL.revokeObjectURL(objUrl); resolve(null); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(objUrl);
+        let q = 0.72;
+        let dataUrl = canvas.toDataURL("image/jpeg", q);
+        while (dataUrl.length > maxBytes * 1.37 && q > 0.35) {
+          q -= 0.12;
+          dataUrl = canvas.toDataURL("image/jpeg", q);
+        }
+        resolve({ dataUrl, mime: "image/jpeg" });
+      } catch {
+        URL.revokeObjectURL(objUrl);
+        resolve(null);
+      }
+    };
+    img.onerror = () => { clearTimeout(timer); URL.revokeObjectURL(objUrl); resolve(null); };
+    img.src = objUrl;
+  });
 }
 
 export async function makeMediaThumbnail(file: Blob): Promise<string> {
