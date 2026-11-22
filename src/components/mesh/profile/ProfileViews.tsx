@@ -28,6 +28,36 @@ export function ContactsPane({
 }) {
   const [contactLimit, setContactLimit] = useState(50);
   const [inviteContact, setInviteContact] = useState<{ name: string; phone: string } | null>(null);
+  useEffect(() => {
+    const prevHandler = (window as any).__gvndOnNativeFilePicked;
+    (window as any).__gvndOnNativeFilePicked = (payload: any) => {
+      if (payload?.purpose === "import_vcf" && payload?.text) {
+        const lines = String(payload.text).split(/\r?\n/);
+        let currentName = "";
+        let currentPhone = "";
+        let count = 0;
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (line.startsWith("FN:")) currentName = line.substring(3).trim();
+          else if (line.startsWith("TEL")) {
+            const parts = line.split(":");
+            if (parts.length > 1) currentPhone = parts[1].replace(/\D/g, "").slice(-10);
+          } else if (line === "END:VCARD") {
+            if (currentPhone.length >= 10) {
+              eng.addContactByPhone(currentName || `User ${currentPhone.slice(-4)}`, `+91${currentPhone}`);
+              count++;
+            }
+            currentName = "";
+            currentPhone = "";
+          }
+        }
+        eng.note(`${count} contacts VCF se import ho gaye!`);
+        return;
+      }
+      if (prevHandler) prevHandler(payload);
+    };
+    return () => { (window as any).__gvndOnNativeFilePicked = prevHandler; };
+  }, [eng]);
   const loadMoreContactsRef = useRef<HTMLDivElement>(null);
   const [contactSearch, setContactSearch] = useState("");
   const [tabMode, setTabMode] = useState<"phone" | "handle">("phone");
@@ -257,7 +287,13 @@ export function ContactsPane({
             </button>
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => {
+                if (typeof window !== "undefined" && (window as any).AndroidBridge?.pickNativeFile) {
+                  (window as any).AndroidBridge.pickNativeFile("*/*", "import_vcf");
+                  return;
+                }
+                fileInputRef.current?.click();
+              }}
               className="flex items-center gap-1 rounded-lg border border-border bg-bg px-2.5 py-1 text-xs font-medium text-muted hover:text-fg hover:border-primary active:scale-95 transition-all"
             >
               📂 Import VCF
@@ -523,7 +559,9 @@ export function ContactsPane({
               <button
                 type="button"
                 onClick={() => {
-                  const inviteMsg = `Namaste ${inviteContact.name}! Main GVND Connect (100% Offline & Online Decentralized Mesh Chat) use kar raha hoon. Meri ID: ${snap.me.globalId} — Aap bhi judiye!`;
+                  const hostUrl = getLocalHostShareUrl();
+                  const localHint = hostUrl && !hostUrl.includes("127.0.0.1") && !hostUrl.includes("localhost") ? ` | Local Hotspot: ${hostUrl}` : "";
+                  const inviteMsg = `Namaste ${inviteContact.name}! Main GVND Connect (100% Offline & Online Decentralized Mesh Chat) use kar raha hoon. Meri ID: ${snap.me.globalId} | App Download: https://github.com/pankajptc/GVND-Connect/releases${localHint}`;
                   if (typeof window !== "undefined" && (window as any).AndroidBridge?.sendSms) {
                     const ok = (window as any).AndroidBridge.sendSms(inviteContact.phone, inviteMsg);
                     if (ok) {
@@ -611,6 +649,42 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
   const [selfPhoneInput, setSelfPhoneInput] = useState("");
   const [otpInput, setOtpInput] = useState("");
   const [lastBackupPath, setLastBackupPath] = useState("");
+  useEffect(() => {
+    const prevHandler = (window as any).__gvndOnNativeFilePicked;
+    (window as any).__gvndOnNativeFilePicked = async (payload: any) => {
+      if (payload?.purpose === "profile_avatar" && payload?.dataUrl) {
+        try {
+          const res = await fetch(payload.dataUrl);
+          const blob = await res.blob();
+          const file = new File([blob], payload.name || "avatar.jpg", { type: blob.type || "image/jpeg" });
+          await (eng as any).setAvatarFile(file);
+        } catch {
+          eng.note("Profile photo update fail hui.");
+        }
+        return;
+      }
+      if (payload?.purpose === "restore_gvnd" && payload?.text) {
+        const pwd = prompt("Is .gvnd file ka Secret Password / PIN dalein:");
+        if (!pwd) return;
+        const res = await (eng as any).importEncryptedGvndFile(payload.text, pwd);
+        if (!res.ok) eng.note(res.err || "Restore fail hua.");
+        return;
+      }
+      if (payload?.purpose === "restore_meshvault" && payload?.text) {
+        const pwd = window.prompt("Backup ka Encryption PIN / Password enter karein:");
+        if (pwd === null) return;
+        const err = await (eng as any).importEncryptedBackup(payload.text, pwd);
+        if (err) eng.note(err);
+        else {
+          eng.note("Node restored! Sub-instance ready.");
+          window.setTimeout(() => window.location.reload(), 1000);
+        }
+        return;
+      }
+      if (prevHandler) prevHandler(payload);
+    };
+    return () => { (window as any).__gvndOnNativeFilePicked = prevHandler; };
+  }, [eng]);
   const fileRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [scanPaste, setScanPaste] = useState("");
@@ -686,7 +760,13 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
           <div className="relative shrink-0">
             <button
               type="button"
-              onClick={() => avatarInputRef.current?.click()}
+              onClick={() => {
+                if (typeof window !== "undefined" && (window as any).AndroidBridge?.pickNativeFile) {
+                  (window as any).AndroidBridge.pickNativeFile("image/*", "profile_avatar");
+                  return;
+                }
+                avatarInputRef.current?.click();
+              }}
               className="relative grid size-16 cursor-pointer place-items-center rounded-full border-2 border-dashed border-primary/40 bg-surface shadow-md hover:border-primary transition-all overflow-hidden group active:scale-95"
               aria-label="Upload Profile Photo"
             >
@@ -768,25 +848,36 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
           >
             Download .gvnd File
           </button>
-          <label className="cursor-pointer rounded-xl border border-border bg-bg px-3 py-2.5 text-center text-xs font-semibold text-ink hover:border-primary">
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined" && (window as any).AndroidBridge?.pickNativeFile) {
+                (window as any).AndroidBridge.pickNativeFile("*/*", "restore_gvnd");
+                return;
+              }
+              document.getElementById("profile-restore-gvnd-input")?.click();
+            }}
+            className="cursor-pointer rounded-xl border border-border bg-bg px-3 py-2.5 text-center text-xs font-semibold text-ink hover:border-primary"
+          >
             Restore .gvnd File
-            <input
-              type="file"
-              accept="*/*"
-              className="sr-only pointer-events-none"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (!f) return;
-                void f.text().then(async (txt) => {
-                  const pwd = prompt("Is .gvnd file ka Secret Password / PIN dalein:");
-                  if (!pwd) return;
-                  const res = await (eng as any).importEncryptedGvndFile(txt, pwd);
-                  if (!res.ok) eng.note(res.err || "Restore fail hua.");
-                });
-              }}
-            />
-          </label>
+          </button>
+          <input
+            id="profile-restore-gvnd-input"
+            type="file"
+            accept="*/*"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              void f.text().then(async (txt) => {
+                const pwd = prompt("Is .gvnd file ka Secret Password / PIN dalein:");
+                if (!pwd) return;
+                const res = await (eng as any).importEncryptedGvndFile(txt, pwd);
+                if (!res.ok) eng.note(res.err || "Restore fail hua.");
+              });
+            }}
+          />
         </div>
         {lastBackupPath && (
           <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-300 break-all">
@@ -959,9 +1050,31 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
           aria-label="Hub key"
           className="w-full rounded-xl border border-border bg-bg px-3 py-3 font-mono text-sm outline-none focus:border-primary"
         />
-        <button type="submit" className="min-h-11 w-full rounded-xl border border-border text-sm">
-          Save hub key
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="submit" className="min-h-11 rounded-xl border border-border text-xs font-semibold hover:border-primary">
+            Save Hub Key
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const h = window.prompt("Apna Username / Handle dalein:", handle || snap.me.handle);
+              if (!h) return;
+              if (!key || key.trim().length < 4) {
+                eng.note("Pehle upar Hub Key / Passphrase dalein.");
+                return;
+              }
+              const res = (eng as any).loginWithPassphrase(h.trim(), key.trim(), false);
+              if (!res?.ok) {
+                eng.note(res?.err || "Hub Key se restore fail hua.");
+              } else {
+                eng.note("✅ Hub Key se account & cryptographic keys restore ho gayi!");
+              }
+            }}
+            className="min-h-11 rounded-xl bg-primary/15 border border-primary/40 text-xs font-semibold text-primary hover:bg-primary/25"
+          >
+            🔄 Restore via Hub Key
+          </button>
+        </div>
       </form>
 
       <div className="flex gap-2">
@@ -987,7 +1100,13 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
         <button
           type="button"
           className="min-h-11 flex-1 rounded-xl border border-border text-sm font-semibold hover:border-primary active:scale-95 transition-all"
-          onClick={() => fileRef.current?.click()}
+          onClick={() => {
+            if (typeof window !== "undefined" && (window as any).AndroidBridge?.pickNativeFile) {
+              (window as any).AndroidBridge.pickNativeFile("*/*", "restore_meshvault");
+              return;
+            }
+            fileRef.current?.click();
+          }}
         >
           📥 Restore
         </button>

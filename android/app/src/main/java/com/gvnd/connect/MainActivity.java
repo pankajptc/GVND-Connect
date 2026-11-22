@@ -90,9 +90,52 @@ public class MainActivity extends BridgeActivity {
     }
     private ValueCallback<Uri[]> filePathCallback;
     private static final int FILE_CHOOSER_REQ = 9001;
+    private static final int NATIVE_PICK_REQ = 9002;
+    private String pendingNativePickPurpose = "";
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == NATIVE_PICK_REQ) {
+            String purpose = pendingNativePickPurpose != null ? pendingNativePickPurpose : "";
+            pendingNativePickPurpose = "";
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri uri = data.getData();
+                new Thread(() -> {
+                    try {
+                        String fileName = "selected_file";
+                        try (Cursor c = getContentResolver().query(uri, null, null, null, null)) {
+                            if (c != null && c.moveToFirst()) {
+                                int idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                                if (idx >= 0 && c.getString(idx) != null) fileName = c.getString(idx);
+                            }
+                        } catch (Exception ignored) {}
+                        String mime = getContentResolver().getType(uri);
+                        if (mime == null || mime.isEmpty()) mime = "application/octet-stream";
+                        byte[] bytes;
+                        try (InputStream is = getContentResolver().openInputStream(uri)) {
+                            bytes = readAllBytes(is);
+                        }
+                        String b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
+                        String dataUrl = "data:" + mime + ";base64," + b64;
+                        String textVal = mime.startsWith("image/") ? "" : new String(bytes, StandardCharsets.UTF_8);
+                        JSONObject payload = new JSONObject();
+                        payload.put("purpose", purpose);
+                        payload.put("name", fileName);
+                        payload.put("dataUrl", dataUrl);
+                        payload.put("text", textVal);
+                        String js = "if(window.__gvndOnNativeFilePicked){window.__gvndOnNativeFilePicked(" + payload.toString() + ");}";
+                        runOnUiThread(() -> {
+                            try {
+                                if (getBridge() != null && getBridge().getWebView() != null) {
+                                    getBridge().getWebView().evaluateJavascript(js, null);
+                                }
+                            } catch (Exception ignored) {}
+                        });
+                    } catch (Exception ignored) {}
+                }).start();
+            }
+            return;
+        }
         if (requestCode == FILE_CHOOSER_REQ && filePathCallback != null) {
             Uri[] results = null;
             if (resultCode == RESULT_OK && data != null) {
@@ -177,15 +220,7 @@ public class MainActivity extends BridgeActivity {
             wv.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             wv.getSettings().setAllowUniversalAccessFromFileURLs(true);
             wv.addJavascriptInterface(new WebAppInterface(), "AndroidBridge");
-            wv.setWebChromeClient(new WebChromeClient() {
-                @Override
-                public void onPermissionRequest(final PermissionRequest request) {
-                    runOnUiThread(() -> {
-                        requestAllRuntimePermissions();
-                        request.grant(request.getResources());
-                    });
-                }
-            });
+            attachCustomFileChooser();
         } catch (Exception ignored) {}
     }
 
@@ -204,8 +239,28 @@ public class MainActivity extends BridgeActivity {
                 needed.add(p);
             }
         }
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, "android.permission.NEARBY_WIFI_DEVICES") != PackageManager.PERMISSION_GRANTED) {
-            needed.add("android.permission.NEARBY_WIFI_DEVICES");
+        if (Build.VERSION.SDK_INT >= 33) {
+            String[] mediaPerms = new String[]{
+                "android.permission.NEARBY_WIFI_DEVICES",
+                "android.permission.READ_MEDIA_IMAGES",
+                "android.permission.READ_MEDIA_VIDEO",
+                "android.permission.READ_MEDIA_AUDIO"
+            };
+            for (String mp : mediaPerms) {
+                if (ContextCompat.checkSelfPermission(this, mp) != PackageManager.PERMISSION_GRANTED) {
+                    needed.add(mp);
+                }
+            }
+        } else {
+            String[] storePerms = new String[]{
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            };
+            for (String sp : storePerms) {
+                if (ContextCompat.checkSelfPermission(this, sp) != PackageManager.PERMISSION_GRANTED) {
+                    needed.add(sp);
+                }
+            }
         }
         if (!needed.isEmpty()) {
             ActivityCompat.requestPermissions(this, needed.toArray(new String[0]), 1001);

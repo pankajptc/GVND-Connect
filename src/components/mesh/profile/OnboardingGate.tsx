@@ -27,6 +27,17 @@ export function OnboardingGate({ snap, eng, onDone }: { snap: Snap; eng: MeshEng
   const [vaultFileName, setVaultFileName] = useState("");
 
   const [authErr, setAuthErr] = useState("");
+  useEffect(() => {
+    (window as any).__gvndOnNativeFilePicked = (payload: any) => {
+      if (payload?.purpose === "onboarding_gvnd" && payload?.text) {
+        setVaultFileName(payload.name || "backup.gvnd");
+        setVaultText(payload.text);
+        setAuthErr("");
+        eng.note("Backup file select ho gayi! Ab Password/PIN dalein.");
+      }
+    };
+    return () => { delete (window as any).__gvndOnNativeFilePicked; };
+  }, [eng]);
   return (
     <main className="h-dvh overflow-y-auto bg-bg px-4 py-8 text-fg">
       <div className="mx-auto my-auto w-full max-w-md space-y-5 rounded-3xl border border-border bg-surface p-6 shadow-2xl">
@@ -165,20 +176,31 @@ export function OnboardingGate({ snap, eng, onDone }: { snap: Snap; eng: MeshEng
             }}
           >
             <p className="text-xs text-muted">Apni encrypted <code className="text-fg">.gvnd</code> backup file select karein aur password dalein.</p>
-            <label className="block cursor-pointer rounded-xl border border-dashed border-primary/50 bg-bg p-4 text-center text-xs font-semibold text-primary">
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== "undefined" && (window as any).AndroidBridge?.pickNativeFile) {
+                  (window as any).AndroidBridge.pickNativeFile("*/*", "onboarding_gvnd");
+                  return;
+                }
+                document.getElementById("ob-gvnd-file-input")?.click();
+              }}
+              className="block w-full cursor-pointer rounded-xl border border-dashed border-primary/50 bg-bg p-4 text-center text-xs font-semibold text-primary hover:bg-primary/10"
+            >
               {vaultFileName ? `Selected: ${vaultFileName}` : "Choose .gvnd Backup File"}
-              <input
-                type="file"
-                accept="*/*"
-                className="sr-only pointer-events-none"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  setVaultFileName(f.name);
-                  void f.text().then((t) => setVaultText(t));
-                }}
-              />
-            </label>
+            </button>
+            <input
+              id="ob-gvnd-file-input"
+              type="file"
+              accept="*/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                setVaultFileName(f.name);
+                void f.text().then((t) => setVaultText(t));
+              }}
+            />
             <input
               type="password"
               placeholder="Backup File Password / PIN"
