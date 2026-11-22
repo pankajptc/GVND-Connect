@@ -549,15 +549,40 @@ public class MainActivity extends BridgeActivity {
             } catch (Exception ignored) {}
         }).start();
 
-        // 2. HTTP Port 18081
+        // 2. Dual-Protocol Auto-Detect Port 18081 (Handles BOTH http:// and https:// automatically)
         new Thread(() -> {
             try {
+                SSLContext dualSslCtx = createSelfSignedSslContext();
                 ServerSocket server = new ServerSocket();
                 server.setReuseAddress(true);
                 server.bind(new InetSocketAddress("0.0.0.0", 18081));
                 while (true) {
-                    Socket client = server.accept();
-                    new Thread(() -> handleClient(client, false)).start();
+                    Socket rawClient = server.accept();
+                    new Thread(() -> {
+                        try {
+                            rawClient.setSoTimeout(8000);
+                            java.io.PushbackInputStream pbis = new java.io.PushbackInputStream(rawClient.getInputStream(), 8);
+                            int firstByte = pbis.read();
+                            if (firstByte == -1) { rawClient.close(); return; }
+                            pbis.unread(firstByte);
+                            if (firstByte == 0x16 && dualSslCtx != null) {
+                                javax.net.ssl.SSLSocket sslSock = (javax.net.ssl.SSLSocket) dualSslCtx.getSocketFactory().createSocket(rawClient, pbis, true);
+                                sslSock.setUseClientMode(false);
+                                sslSock.startHandshake();
+                                handleClient(sslSock, true);
+                            } else {
+                                Socket wrapped = new Socket() {
+                                    @Override public InputStream getInputStream() { return pbis; }
+                                    @Override public OutputStream getOutputStream() throws IOException { return rawClient.getOutputStream(); }
+                                    @Override public synchronized void close() throws IOException { rawClient.close(); }
+                                    @Override public void setSoTimeout(int timeout) throws SocketException { rawClient.setSoTimeout(timeout); }
+                                };
+                                handleClient(wrapped, false);
+                            }
+                        } catch (Exception ignored) {
+                            try { rawClient.close(); } catch (Exception ignored2) {}
+                        }
+                    }).start();
                 }
             } catch (Exception ignored) {}
         }).start();
