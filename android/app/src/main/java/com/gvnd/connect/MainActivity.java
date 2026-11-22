@@ -56,37 +56,6 @@ public class MainActivity extends BridgeActivity {
     private long lastBackPressMs = 0;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        attachCustomFileChooser();
-        getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
-            @Override
-            public void handleOnBackPressed() {
-                try {
-                    if (getBridge() != null && getBridge().getWebView() != null) {
-                        getBridge().getWebView().evaluateJavascript(
-                            "(function(){ return window.gvndHandleBack ? String(window.gvndHandleBack()) : \"false\"; })()",
-                            val -> {
-                                if (!"\"true\"".equals(val) && !"true".equals(val)) {
-                                    long now = System.currentTimeMillis();
-                                    if (now - lastBackPressMs < 2000) {
-                                        finish();
-                                    } else {
-                                        lastBackPressMs = now;
-                                        android.widget.Toast.makeText(MainActivity.this, "App band karne ke liye dobara Back dabayein", android.widget.Toast.LENGTH_SHORT).show();
-                                    }
-                                }
-                            }
-                        );
-                        return;
-                    }
-                } catch (Exception ignored) {}
-                finish();
-            }
-        });
-    }
-
-    @Override
     public void onResume() {
         super.onResume();
         if (!askedPermsOnce) {
@@ -157,6 +126,31 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                try {
+                    if (getBridge() != null && getBridge().getWebView() != null) {
+                        getBridge().getWebView().evaluateJavascript(
+                            "(function(){ return window.gvndHandleBack ? String(window.gvndHandleBack()) : \"false\"; })()",
+                            val -> {
+                                if (!"\"true\"".equals(val) && !"true".equals(val)) {
+                                    long now = System.currentTimeMillis();
+                                    if (now - lastBackPressMs < 2000) {
+                                        finish();
+                                    } else {
+                                        lastBackPressMs = now;
+                                        android.widget.Toast.makeText(MainActivity.this, "App band karne ke liye dobara Back dabayein", android.widget.Toast.LENGTH_SHORT).show();
+                                    }
+                                }
+                            }
+                        );
+                        return;
+                    }
+                } catch (Exception ignored) {}
+                finish();
+            }
+        });
         if (getBridge() != null && getBridge().getWebView() != null) {
             getBridge().getWebView().setWebChromeClient(new WebChromeClient() {
                 @Override
