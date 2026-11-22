@@ -131,8 +131,25 @@ function Shell({ snap, eng }: { snap: Snap; eng: MeshEngine }) {
       if (tab !== "chats") { setTab("chats"); pushGuard(); return; }
       pushGuard();
     };
+    (window as any).gvndHandleBack = () => {
+      if ((window as any).__gvndSubModalClose) {
+        (window as any).__gvndSubModalClose();
+        return true;
+      }
+      if (preview) { setPreview(null); return true; }
+      if (commentsFor) { setCommentsFor(null); return true; }
+      if (deckPost) { setDeckPost(null); return true; }
+      if (composer) { setComposer(null); return true; }
+      if (showHotspotStation) { setShowHotspotStation(false); return true; }
+      if (chatTag) { setChatTag(null); return true; }
+      if (tab !== "chats") { setTab("chats"); return true; }
+      return false;
+    };
     window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      delete (window as any).gvndHandleBack;
+    };
   }, [preview, commentsFor, deckPost, composer, showHotspotStation, chatTag, tab]);
 
   const unread = totalUnread(snap);

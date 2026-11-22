@@ -17,7 +17,8 @@ import {
 import { Avatar, Empty, Field, IconBtn, Metric, Mini, Stat, VerificationBadge } from "@/components/mesh/shared/UiPrimitives";
 
 export function OnboardingGate({ snap, eng, onDone }: { snap: Snap; eng: MeshEngine; onDone: () => void }) {
-  const [mode, setMode] = useState<"signup" | "vault" | "pin">("signup");
+  const [mode, setMode] = useState<"signup" | "vault" | "pin" | "desktop">("signup");
+  const [desktopSessionCode] = useState(() => "GVND-DESK-" + Math.random().toString(36).slice(2, 10).toUpperCase());
   const [name, setName] = useState("");
   const [handle, setHandle] = useState("");
   const [pin, setPin] = useState("");
@@ -49,7 +50,7 @@ export function OnboardingGate({ snap, eng, onDone }: { snap: Snap; eng: MeshEng
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-1 rounded-xl border border-border bg-bg p-1 text-xs font-semibold">
+        <div className="grid grid-cols-4 gap-1 rounded-xl border border-border bg-bg p-1 text-[11px] font-semibold">
           <button
             type="button"
             onClick={() => setMode("signup")}
@@ -70,6 +71,13 @@ export function OnboardingGate({ snap, eng, onDone }: { snap: Snap; eng: MeshEng
             className={`rounded-lg py-2 ${mode === "pin" ? "bg-primary text-primary-fg" : "text-muted"}`}
           >
             Handle + PIN
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("desktop")}
+            className={`rounded-lg py-2 ${mode === "desktop" ? "bg-primary text-primary-fg" : "text-muted"}`}
+          >
+            Link Web
           </button>
         </div>
 
@@ -182,6 +190,30 @@ export function OnboardingGate({ snap, eng, onDone }: { snap: Snap; eng: MeshEng
               Decrypt & Restore Account
             </button>
           </form>
+        )}
+
+        {mode === "desktop" && (
+          <div className="space-y-3 text-center">
+            <p className="text-xs text-muted">
+              Apne Mobile App mein <b className="text-fg">Profile → Link to Web / Scan QR</b> khol kar is Desktop QR ko scan karein:
+            </p>
+            <div className="flex justify-center rounded-2xl border border-border bg-white p-3 mx-auto w-fit">
+              <QRCodeSVG
+                value={JSON.stringify({
+                  type: "gvnd_desktop_pair",
+                  session: desktopSessionCode,
+                  host: typeof window !== "undefined" ? window.location.origin : "",
+                })}
+                size={180}
+              />
+            </div>
+            <div className="rounded-xl border border-border bg-bg px-3 py-2 font-mono text-xs text-primary">
+              Session Code: {desktopSessionCode}
+            </div>
+            <p className="text-[11px] text-muted">
+              Scan karne ke baad mobile par dikhne wale Handle + PIN se yahan instant login ho jayega.
+            </p>
+          </div>
         )}
 
         {mode === "pin" && (

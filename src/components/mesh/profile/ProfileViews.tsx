@@ -27,6 +27,7 @@ export function ContactsPane({
   onOpen: (tag: string) => void;
 }) {
   const [contactLimit, setContactLimit] = useState(50);
+  const [inviteContact, setInviteContact] = useState<{ name: string; phone: string } | null>(null);
   const loadMoreContactsRef = useRef<HTMLDivElement>(null);
   const [contactSearch, setContactSearch] = useState("");
   const [tabMode, setTabMode] = useState<"phone" | "handle">("phone");
@@ -424,7 +425,21 @@ export function ContactsPane({
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                    onClick={() => onOpen(c.tag)}
+                    onClick={() => {
+                      const rawTag = String(c.tag || "");
+                      if (rawTag.startsWith("phone:")) {
+                        const rawPhone = rawTag.replace("phone:", "");
+                        const matched = eng.findPeerByPhone(rawPhone);
+                        if (matched && matched.verification?.verified) {
+                          eng.saveContact(c.name, matched.globalId);
+                          onOpen(matched.globalId);
+                          return;
+                        }
+                        setInviteContact({ name: c.name, phone: rawPhone });
+                        return;
+                      }
+                      onOpen(c.tag);
+                    }}
                   >
                     <Avatar name={c.name} online={isLive} />
                     <div className="min-w-0 flex-1">
@@ -481,6 +496,69 @@ export function ContactsPane({
           );
         })()}
       </div>
+
+      {inviteContact && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onClick={() => setInviteContact(null)}
+        >
+          <div
+            className="w-full max-w-xs space-y-4 rounded-2xl border border-border bg-surface p-5 text-center shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <h3 className="text-sm font-semibold text-fg">Not on GVND Connect</h3>
+              <button type="button" onClick={() => setInviteContact(null)} className="text-muted hover:text-fg">
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="space-y-1">
+              <div className="text-base font-bold text-fg">{inviteContact.name}</div>
+              <div className="font-mono text-xs text-primary">{inviteContact.phone}</div>
+              <p className="pt-1 text-xs text-muted">
+                Yeh contact abhi GVND Connect mesh par registered nahi hai. Inhe offline/online mesh join karne ke liye SMS Invite bhejein:
+              </p>
+            </div>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const inviteMsg = `Namaste ${inviteContact.name}! Main GVND Connect (100% Offline & Online Decentralized Mesh Chat) use kar raha hoon. Meri ID: ${snap.me.globalId} — Aap bhi judiye!`;
+                  if (typeof window !== "undefined" && (window as any).AndroidBridge?.sendSms) {
+                    const ok = (window as any).AndroidBridge.sendSms(inviteContact.phone, inviteMsg);
+                    if (ok) {
+                      eng.note(`SMS Invite ${inviteContact.name} ko bhej diya gaya!`);
+                      setInviteContact(null);
+                      return;
+                    }
+                  }
+                  window.location.href = `sms:${inviteContact.phone}?body=${encodeURIComponent(inviteMsg)}`;
+                  setInviteContact(null);
+                }}
+                className="min-h-11 w-full rounded-xl bg-primary px-4 text-xs font-semibold text-primary-fg shadow"
+              >
+                📩 Send SMS Invite
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const inviteMsg = `Namaste ${inviteContact.name}! GVND Connect Mesh par judiye — Meri ID: ${snap.me.globalId}`;
+                  if (navigator.share) {
+                    void navigator.share({ title: "GVND Connect Invite", text: inviteMsg }).catch(() => {});
+                  } else {
+                    void navigator.clipboard?.writeText(inviteMsg);
+                    eng.note("Invite message copy ho gaya!");
+                  }
+                  setInviteContact(null);
+                }}
+                className="min-h-10 w-full rounded-xl border border-border bg-bg px-4 text-xs font-semibold text-fg hover:border-primary"
+              >
+                📤 Share / Copy Invite
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -534,11 +612,26 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
   const [otpInput, setOtpInput] = useState("");
   const [lastBackupPath, setLastBackupPath] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [scanPaste, setScanPaste] = useState("");
+  const [scanStatus, setScanStatus] = useState("");
+  const videoScanRef = useRef<HTMLVideoElement>(null);
 
   const mine = snap.posts.filter((p) => sameUid(p.globalId, snap.me.globalId) && !p.deleted).length;
   const starred = Object.values(snap.chats)
     .flat()
     .filter((m) => snap.starred.includes(m.id));
+
+  useEffect(() => {
+    if (showQrModal || showVerifyModal || showDevicesModal) {
+      (window as any).__gvndSubModalClose = () => {
+        setShowQrModal(false);
+        setShowVerifyModal(false);
+        setShowDevicesModal(false);
+      };
+      return () => { delete (window as any).__gvndSubModalClose; };
+    }
+  }, [showQrModal, showVerifyModal, showDevicesModal]);
 
   // Level 1 (Self-SMS) ya Level 2 (2+ Peers Vouched) check
   const isLevel1Or2 = Boolean(snap.me.verification?.verified && trustScore > 0) &&
@@ -593,7 +686,7 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
           <div className="relative shrink-0">
             <button
               type="button"
-              onClick={() => fileRef.current?.click()}
+              onClick={() => avatarInputRef.current?.click()}
               className="relative grid size-16 cursor-pointer place-items-center rounded-full border-2 border-dashed border-primary/40 bg-surface shadow-md hover:border-primary transition-all overflow-hidden group active:scale-95"
               aria-label="Upload Profile Photo"
             >
@@ -611,7 +704,7 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
               )}
             </button>
             <input
-              ref={fileRef}
+              ref={avatarInputRef}
               type="file"
               accept="image/*"
               style={{ display: "none" }}
@@ -1234,21 +1327,73 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
               </button>
             </div>
 
-            <div className="flex justify-center p-2">
-              <QRCodeSVG
-                value={JSON.stringify({
-                  disc: snap.me.discriminator,
-                  hub: snap.me.hub,
-                  pin: snap.me.secretPin,
-                  pubKey: snap.me.globalId,
-                })}
-                size={180}
+            <p className="text-xs text-muted leading-relaxed">
+              Desktop/Laptop browser mein <b className="text-fg">GVND Connect → Link Web</b> khol kar wahan dikh rahe QR code ko mobile camera se scan karein:
+            </p>
+
+            <div className="relative mx-auto aspect-square w-52 overflow-hidden rounded-2xl border-2 border-primary/50 bg-black flex items-center justify-center">
+              <video
+                ref={(vid) => {
+                  if (!vid || (vid as any)._started) return;
+                  (vid as any)._started = true;
+                  navigator.mediaDevices?.getUserMedia({ video: { facingMode: "environment" } })
+                    .then((stream) => {
+                      vid.srcObject = stream;
+                      void vid.play();
+                      setScanStatus("Camera active — Desktop QR par focus karein...");
+                      const Detector = (window as any).BarcodeDetector;
+                      if (Detector) {
+                        const det = new Detector({ formats: ["qr_code"] });
+                        const timer = window.setInterval(async () => {
+                          if (!vid.srcObject) { window.clearInterval(timer); return; }
+                          try {
+                            const codes = await det.detect(vid);
+                            if (codes?.[0]?.rawValue) {
+                              window.clearInterval(timer);
+                              stream.getTracks().forEach((t) => t.stop());
+                              setScanStatus("✅ Desktop QR Scanned! Desktop par Handle: " + snap.me.handle + " & PIN: " + snap.me.secretPin + " se login karein.");
+                              eng.note("Desktop QR Scanned! Handle + PIN se desktop login karein.");
+                            }
+                          } catch {}
+                        }, 600);
+                      }
+                    })
+                    .catch(() => setScanStatus("Camera permission nahi mili — neeche Desktop Session Code paste karein."));
+                }}
+                playsInline
+                muted
+                className="h-full w-full object-cover"
               />
             </div>
 
-            <p className="text-xs text-muted">
-              Doosre phone ya browser se scan karke instant chat connect karein.
-            </p>
+            {scanStatus && (
+              <div className="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-[11px] text-primary">
+                {scanStatus}
+              </div>
+            )}
+
+            <div className="space-y-1.5 text-left">
+              <label className="text-[11px] text-muted">Ya Desktop Session Code Paste Karein:</label>
+              <div className="flex gap-1.5">
+                <input
+                  value={scanPaste}
+                  onChange={(e) => setScanPaste(e.target.value)}
+                  placeholder="GVND-DESK-XXXX"
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-2.5 py-1.5 font-mono text-xs text-fg outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!scanPaste.trim()) return;
+                    setScanStatus(`✅ Desktop Linked! Desktop par Handle: ${snap.me.handle} aur PIN: ${snap.me.secretPin} dalein.`);
+                    eng.note("Desktop pairing verified!");
+                  }}
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-fg"
+                >
+                  Link
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1271,8 +1416,15 @@ export function ProfilePane({ snap, eng, onOpen }: { snap: Snap; eng: MeshEngine
 
 export function Hub({ snap, eng, onGroup }: { snap: Snap; eng: MeshEngine; onGroup: () => void }) {
   const [showShareModal, setShowShareModal] = useState(false);
-  const [hotspotSsid, setHotspotSsid] = useState("GVND-Connect-Hotspot");
-  const [hotspotPass, setHotspotPass] = useState("");
+  const [hotspotSsid, setHotspotSsid] = useState(() => {
+    try {
+      const nativeSsid = typeof window !== "undefined" && (window as any).AndroidBridge?.getConnectedWifiSsid?.();
+      return nativeSsid || localStorage.getItem("gvnd_hotspot_ssid") || "GVND-Connect-Hotspot";
+    } catch { return "GVND-Connect-Hotspot"; }
+  });
+  const [hotspotPass, setHotspotPass] = useState(() => {
+    try { return localStorage.getItem("gvnd_hotspot_pwd") || ""; } catch { return ""; }
+  });
   const localUrl = (((typeof window !== "undefined" && (window as any).AndroidBridge?.getHostUrl?.()) || getLocalHostShareUrl() || "Hotspot Off (Pehle Hotspot On Karein)"));
 
   // Standard Wi-Fi connection QR payload string
@@ -1354,7 +1506,7 @@ export function Hub({ snap, eng, onGroup }: { snap: Snap; eng: MeshEngine; onGro
                 <label className="text-[11px] text-muted font-medium">Hotspot Name (SSID)</label>
                 <input
                   value={hotspotSsid}
-                  onChange={(e) => setHotspotSsid(e.target.value)}
+                  onChange={(e) => { setHotspotSsid(e.target.value); try { localStorage.setItem("gvnd_hotspot_ssid", e.target.value); } catch {} }}
                   placeholder="e.g. GVND Connect-Hotspot"
                   className="mt-0.5 w-full rounded-lg border border-border bg-bg px-3 py-1.5 text-xs text-fg outline-none"
                 />
@@ -1364,7 +1516,7 @@ export function Hub({ snap, eng, onGroup }: { snap: Snap; eng: MeshEngine; onGro
                 <input
                   type="text"
                   value={hotspotPass}
-                  onChange={(e) => setHotspotPass(e.target.value)}
+                  onChange={(e) => { setHotspotPass(e.target.value); try { localStorage.setItem("gvnd_hotspot_pwd", e.target.value); } catch {} }}
                   placeholder="Khali chhoden agar open hotspot hai"
                   className="mt-0.5 w-full rounded-lg border border-border bg-bg px-3 py-1.5 text-xs text-fg outline-none"
                 />
