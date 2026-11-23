@@ -551,41 +551,28 @@ public class MainActivity extends BridgeActivity {
             } catch (Exception ignored) {}
         }).start();
 
-        // 2. Dual-Protocol Auto-Detect Port 18081 (Handles BOTH http:// and https:// automatically)
+        // 2. Rock-Solid Port 18081 Server (Direct real Socket + PushbackInputStream, zero broken Socket wrappers)
         new Thread(() -> {
             try {
-                SSLContext dualSslCtx = createSelfSignedSslContext();
                 ServerSocket server = new ServerSocket();
                 server.setReuseAddress(true);
-                server.bind(new InetSocketAddress("0.0.0.0", 18081));
+                server.bind(new InetSocketAddress("0.0.0.0", 18081), 64);
                 while (true) {
                     Socket rawClient = server.accept();
                     new Thread(() -> {
                         try {
-                            rawClient.setSoTimeout(8000);
+                            rawClient.setSoTimeout(10000);
+                            rawClient.setTcpNoDelay(true);
                             java.io.PushbackInputStream pbis = new java.io.PushbackInputStream(rawClient.getInputStream(), 8);
                             int firstByte = pbis.read();
                             if (firstByte == -1) { rawClient.close(); return; }
                             pbis.unread(firstByte);
-                            Socket wrapped = new Socket() {
-                                @Override public InputStream getInputStream() { return pbis; }
-                                @Override public OutputStream getOutputStream() throws IOException { return rawClient.getOutputStream(); }
-                                @Override public synchronized void close() throws IOException { rawClient.close(); }
-                                @Override public void setSoTimeout(int timeout) throws SocketException { rawClient.setSoTimeout(timeout); }
-                                @Override public java.net.InetAddress getInetAddress() { return rawClient.getInetAddress(); }
-                                @Override public int getPort() { return rawClient.getPort(); }
-                                @Override public int getLocalPort() { return rawClient.getLocalPort(); }
-                                @Override public boolean isConnected() { return rawClient.isConnected(); }
-                                @Override public boolean isClosed() { return rawClient.isClosed(); }
-                            };
-                            if (firstByte == 0x16 && dualSslCtx != null) {
-                                javax.net.ssl.SSLSocket sslSock = (javax.net.ssl.SSLSocket) dualSslCtx.getSocketFactory().createSocket(wrapped, "localhost", 18081, true);
-                                sslSock.setUseClientMode(false);
-                                sslSock.startHandshake();
-                                handleClient(sslSock, true);
-                            } else {
-                                handleClient(wrapped, false);
+                            if (firstByte == 0x16) {
+                                // Browser attempted TLS on HTTP port: close cleanly so browser retries HTTP
+                                rawClient.close();
+                                return;
                             }
+                            handleClientWithStreams(rawClient, pbis, rawClient.getOutputStream(), false);
                         } catch (Exception ignored) {
                             try { rawClient.close(); } catch (Exception ignored2) {}
                         }
@@ -614,8 +601,15 @@ public class MainActivity extends BridgeActivity {
 
     private void handleClient(Socket client, boolean isHttps) {
         try {
-            client.setSoTimeout(8000);
-            InputStream in = client.getInputStream();
+            handleClientWithStreams(client, client.getInputStream(), client.getOutputStream(), isHttps);
+        } catch (Exception ignored) {
+            try { client.close(); } catch (Exception ignored2) {}
+        }
+    }
+
+    private void handleClientWithStreams(Socket client, InputStream in, OutputStream outStream, boolean isHttps) {
+        try {
+            client.setSoTimeout(10000);
             ByteArrayOutputStream headerBuf = new ByteArrayOutputStream();
             int prev = -1, curr;
             int lineEndCount = 0;
@@ -881,6 +875,7 @@ public class MainActivity extends BridgeActivity {
                     "Content-Type: " + mime + "\r\n" +
                     "Accept-Ranges: bytes\r\n" +
                     "Access-Control-Allow-Origin: *\r\n" +
+                    "Connection: close\r\n" +
                     "Content-Length: " + total + "\r\n\r\n";
             out.write(headers.getBytes(StandardCharsets.UTF_8));
             out.write(data);
@@ -895,6 +890,7 @@ public class MainActivity extends BridgeActivity {
                 "Access-Control-Allow-Origin: *\r\n" +
                 "Access-Control-Allow-Methods: GET,POST,OPTIONS\r\n" +
                 "Access-Control-Allow-Headers: Content-Type,Range\r\n" +
+                "Connection: close\r\n" +
                 "Content-Length: " + bytes.length + "\r\n\r\n";
         OutputStream out = client.getOutputStream();
         out.write(headers.getBytes(StandardCharsets.UTF_8));
