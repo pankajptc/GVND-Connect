@@ -1,6 +1,5 @@
 import { defineConfig } from "vite";
 import viteReact from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
 export default defineConfig({
@@ -11,12 +10,7 @@ export default defineConfig({
     },
     dedupe: ["react", "react-dom"],
   },
-  plugins: [tailwindcss(), viteReact()],
-  server: {
-    watch: {
-      ignored: ["**/android/**", "**/.output/**", "**/node_modules/**"],
-    },
-  },
+  plugins: [viteReact()],
   build: {
     outDir: ".output/public",
     emptyOutDir: false,

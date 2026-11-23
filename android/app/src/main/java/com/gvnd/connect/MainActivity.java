@@ -565,18 +565,23 @@ public class MainActivity extends BridgeActivity {
                             int firstByte = pbis.read();
                             if (firstByte == -1) { rawClient.close(); return; }
                             pbis.unread(firstByte);
+                            Socket wrapped = new Socket() {
+                                @Override public InputStream getInputStream() { return pbis; }
+                                @Override public OutputStream getOutputStream() throws IOException { return rawClient.getOutputStream(); }
+                                @Override public synchronized void close() throws IOException { rawClient.close(); }
+                                @Override public void setSoTimeout(int timeout) throws SocketException { rawClient.setSoTimeout(timeout); }
+                                @Override public java.net.InetAddress getInetAddress() { return rawClient.getInetAddress(); }
+                                @Override public int getPort() { return rawClient.getPort(); }
+                                @Override public int getLocalPort() { return rawClient.getLocalPort(); }
+                                @Override public boolean isConnected() { return rawClient.isConnected(); }
+                                @Override public boolean isClosed() { return rawClient.isClosed(); }
+                            };
                             if (firstByte == 0x16 && dualSslCtx != null) {
-                                javax.net.ssl.SSLSocket sslSock = (javax.net.ssl.SSLSocket) dualSslCtx.getSocketFactory().createSocket(rawClient, pbis, true);
+                                javax.net.ssl.SSLSocket sslSock = (javax.net.ssl.SSLSocket) dualSslCtx.getSocketFactory().createSocket(wrapped, "localhost", 18081, true);
                                 sslSock.setUseClientMode(false);
                                 sslSock.startHandshake();
                                 handleClient(sslSock, true);
                             } else {
-                                Socket wrapped = new Socket() {
-                                    @Override public InputStream getInputStream() { return pbis; }
-                                    @Override public OutputStream getOutputStream() throws IOException { return rawClient.getOutputStream(); }
-                                    @Override public synchronized void close() throws IOException { rawClient.close(); }
-                                    @Override public void setSoTimeout(int timeout) throws SocketException { rawClient.setSoTimeout(timeout); }
-                                };
                                 handleClient(wrapped, false);
                             }
                         } catch (Exception ignored) {
