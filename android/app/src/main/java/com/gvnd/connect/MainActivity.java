@@ -211,6 +211,8 @@ public class MainActivity extends BridgeActivity {
         requestAllRuntimePermissions();
         registerSmsSentObserver();
         startEmbeddedServers();
+        startMeshKeepAliveService();
+        registerNetworkChangeWatcher();
 
         try {
             WebView wv = getBridge().getWebView();
@@ -222,6 +224,45 @@ public class MainActivity extends BridgeActivity {
             wv.addJavascriptInterface(new WebAppInterface(), "AndroidBridge");
             attachCustomFileChooser();
         } catch (Exception ignored) {}
+    }
+
+    private void startMeshKeepAliveService() {
+        try {
+            Intent svc = new Intent(this, MeshKeepAliveService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(svc);
+            } else {
+                startService(svc);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void registerNetworkChangeWatcher() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                cm.registerDefaultNetworkCallback(new android.net.ConnectivityManager.NetworkCallback() {
+                    @Override
+                    public void onAvailable(android.net.Network network) {
+                        notifyWebNetworkChanged();
+                    }
+                    @Override
+                    public void onLost(android.net.Network network) {
+                        notifyWebNetworkChanged();
+                    }
+                });
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void notifyWebNetworkChanged() {
+        runOnUiThread(() -> {
+            try {
+                if (getBridge() != null && getBridge().getWebView() != null) {
+                    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('gvnd-network-changed'));", null);
+                }
+            } catch (Exception ignored) {}
+        });
     }
 
     public void requestAllRuntimePermissions() {
