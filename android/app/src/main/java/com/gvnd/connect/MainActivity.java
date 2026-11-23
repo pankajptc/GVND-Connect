@@ -52,6 +52,7 @@ import javax.net.ssl.SSLServerSocketFactory;
 import javax.security.auth.x500.X500Principal;
 
 public class MainActivity extends BridgeActivity {
+    private volatile ServerSocket activeHttpServer = null;
     private boolean askedPermsOnce = false;
     private long lastBackPressMs = 0;
 
