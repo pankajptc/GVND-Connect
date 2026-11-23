@@ -450,14 +450,16 @@ public class MainActivity extends BridgeActivity {
                 NetworkInterface intf = en.nextElement();
                 if (!intf.isUp() || intf.isLoopback()) continue;
                 String name = intf.getName().toLowerCase();
-                if (name.contains("rmnet") || name.contains("ccmni") || name.contains("pdp") || name.contains("dummy")) continue;
+                if (name.contains("rmnet") || name.contains("ccmni") || name.contains("pdp") || name.contains("dummy") || name.contains("clat") || name.contains("tun")) continue;
                 for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements(); ) {
                     InetAddress inetAddress = enumIpAddr.nextElement();
                     if (!inetAddress.isLoopbackAddress() && inetAddress instanceof Inet4Address) {
                         String ip = inetAddress.getHostAddress();
-                        if (name.contains("ap") || name.contains("swlan") || name.contains("wlan1") || ip.endsWith(".1")) return ip;
-                        if (name.contains("ap") || name.contains("swlan") || name.contains("wlan")) {
-                            if (ip.startsWith("192.168.")) apIp = ip;
+                        if (ip.startsWith("100.")) continue;
+                        if (ip.startsWith("10.") && !ip.endsWith(".1")) continue;
+                        if (ip.startsWith("192.168.") && ip.endsWith(".1")) return ip;
+                        if ((name.contains("ap") || name.contains("swlan") || name.contains("wlan1")) && ip.startsWith("192.168.")) {
+                            apIp = ip;
                         }
                         if (ip.startsWith("192.168.") && wifi192.isEmpty()) wifi192 = ip;
                     }
