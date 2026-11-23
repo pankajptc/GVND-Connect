@@ -255,7 +255,18 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception ignored) {}
     }
 
+    private void restartHttpServerOnNetworkChange() {
+        try {
+            if (activeHttpServer != null && !activeHttpServer.isClosed()) {
+                activeHttpServer.close();
+            }
+        } catch (Exception ignored) {}
+        serverStarted = false;
+        new Handler(Looper.getMainLooper()).postDelayed(this::startEmbeddedServers, 400);
+    }
+
     private void notifyWebNetworkChanged() {
+        restartHttpServerOnNetworkChange();
         runOnUiThread(() -> {
             try {
                 if (getBridge() != null && getBridge().getWebView() != null) {
@@ -282,6 +293,7 @@ public class MainActivity extends BridgeActivity {
         }
         if (Build.VERSION.SDK_INT >= 33) {
             String[] mediaPerms = new String[]{
+                "android.permission.POST_NOTIFICATIONS",
                 "android.permission.NEARBY_WIFI_DEVICES",
                 "android.permission.READ_MEDIA_IMAGES",
                 "android.permission.READ_MEDIA_VIDEO",
@@ -334,11 +346,13 @@ public class MainActivity extends BridgeActivity {
             for (NetworkInterface intf : Collections.list(NetworkInterface.getNetworkInterfaces())) {
                 if (!intf.isUp() || intf.isLoopback()) continue;
                 String name = intf.getName().toLowerCase();
-                if (name.contains("rmnet") || name.contains("ccmni") || name.contains("pdp") || name.contains("dummy")) continue;
+                if (name.contains("rmnet") || name.contains("ccmni") || name.contains("pdp") || name.contains("dummy") || name.contains("clat") || name.contains("tun")) continue;
                 for (InetAddress addr : Collections.list(intf.getInetAddresses())) {
                     if (!addr.isLoopbackAddress() && addr instanceof Inet4Address) {
                         String ip = addr.getHostAddress();
-                        if (ip != null && (ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172."))) {
+                        if (ip == null || ip.startsWith("100.")) continue;
+                        if (ip.startsWith("10.") && !ip.endsWith(".1")) continue;
+                        if (ip.startsWith("192.168.") || ip.startsWith("172.") || (ip.startsWith("10.") && ip.endsWith(".1"))) {
                             if (name.contains("ap") || name.contains("swlan") || name.contains("wlan1") || ip.endsWith(".1")) {
                                 return "http://" + ip + ":18081";
                             }
@@ -596,6 +610,7 @@ public class MainActivity extends BridgeActivity {
         new Thread(() -> {
             try {
                 ServerSocket server = new ServerSocket();
+                activeHttpServer = server;
                 server.setReuseAddress(true);
                 server.bind(new InetSocketAddress("0.0.0.0", 18081), 64);
                 while (true) {
