@@ -1583,6 +1583,14 @@ export function Hub({ snap, eng, onGroup }: { snap: Snap; eng: MeshEngine; onGro
           >
             📡 Share Hotspot & Portal QR
           </button>
+          <a
+            href="http://127.0.0.1:18081"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 items-center rounded-lg border border-border bg-bg px-4 text-xs font-semibold text-fg hover:bg-surface"
+          >
+            🧪 Test Local Server (Isi Phone Par)
+          </a>
           <button
             type="button"
             className="min-h-11 rounded-lg border border-border px-4 text-sm hover:bg-elevated transition-colors"

@@ -256,18 +256,7 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception ignored) {}
     }
 
-    private void restartHttpServerOnNetworkChange() {
-        try {
-            if (activeHttpServer != null && !activeHttpServer.isClosed()) {
-                activeHttpServer.close();
-            }
-        } catch (Exception ignored) {}
-        serverStarted = false;
-        new Handler(Looper.getMainLooper()).postDelayed(this::startEmbeddedServers, 400);
-    }
-
     private void notifyWebNetworkChanged() {
-        restartHttpServerOnNetworkChange();
         runOnUiThread(() -> {
             try {
                 if (getBridge() != null && getBridge().getWebView() != null) {
@@ -352,11 +341,12 @@ public class MainActivity extends BridgeActivity {
                     if (!addr.isLoopbackAddress() && addr instanceof Inet4Address) {
                         String ip = addr.getHostAddress();
                         if (ip == null || ip.startsWith("100.")) continue;
+                        if (name.contains("ap") || name.contains("swlan") || name.contains("wlan1")) {
+                            return "http://" + ip + ":18081";
+                        }
                         if (ip.startsWith("10.") && !ip.endsWith(".1")) continue;
                         if (ip.startsWith("192.168.") || ip.startsWith("172.") || (ip.startsWith("10.") && ip.endsWith(".1"))) {
-                            if (name.contains("ap") || name.contains("swlan") || name.contains("wlan1") || ip.endsWith(".1")) {
-                                return "http://" + ip + ":18081";
-                            }
+                            if (ip.endsWith(".1")) return "http://" + ip + ":18081";
                             fallbackIp = ip;
                         }
                     }
