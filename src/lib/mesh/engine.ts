@@ -2859,7 +2859,8 @@ private async freshIdentity(): Promise<Identity> {
       return { ok: false, globalId: this.me().globalId, err: "Username aur Secret PIN dono dalein." };
     }
     let h1 = 0x811c9dc5, h2 = 0x01000193;
-    const seed = cleanHandle + "::gvnd::" + secret;
+    const salt = allowCreate ? (crypto.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2))) : "";
+    const seed = cleanHandle + "::gvnd::" + secret + (salt ? "::" + salt : "");
     for (let i = 0; i < seed.length; i++) {
       const ch = seed.charCodeAt(i);
       h1 ^= ch;

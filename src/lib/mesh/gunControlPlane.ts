@@ -18,6 +18,8 @@ class GvndControlPlane {
           this.peers.add(`${window.location.origin}/gun`);
         }
         this.peers.add("http://127.0.0.1:18081/gun");
+        this.peers.add("https://gun-manhattan.herokuapp.com/gun");
+        this.peers.add("https://peer.wallie.io/gun");
         if ((window as any).Gun) {
           this.gun = (window as any).Gun({
             peers: Array.from(this.peers),
@@ -65,6 +67,8 @@ class GvndControlPlane {
     try {
       this.gun?.get(NAMESPACE).get("peers").map().on((data: any) => {
         if (!data || !data.globalId) return;
+        const seenAt = Number(data.lastSeen || 0);
+        if (!seenAt || Date.now() - seenAt > 25000) return;
         onPeer({
           globalId: String(data.globalId),
           name: String(data.name || "GVND Peer"),

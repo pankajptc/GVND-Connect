@@ -85,7 +85,7 @@ export function nameOf(snap: Snap, tag: string): string {
     const handle = tag.slice(1).split("@")[0];
     if (handle && !handle.startsWith("peer")) return handle.charAt(0).toUpperCase() + handle.slice(1);
   }
-  return tag.split("#")[0] || tag;
+  return tag.startsWith("@") ? tag : (tag.split("#")[0] || tag);
 }
 
 export function unreadCount(snap: Snap, tag: string): number {
